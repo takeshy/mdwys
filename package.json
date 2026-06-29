@@ -1,0 +1,24 @@
+{
+  "name": "mdwys",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@vitejs/plugin-react": "^5.1.2",
+    "highlight.js": "^11.11.1",
+    "lucide-react": "^0.563.0",
+    "mermaid": "^11.12.2",
+    "react": "^19.2.4",
+    "react-dom": "^19.2.4",
+    "react-markdown": "^10.1.0",
+    "rehype-highlight": "^7.0.2",
+    "remark-gfm": "^4.0.1",
+    "vite": "^7.1.7",
+    "wysimark-lite": "^0.27.5"
+  },
+  "devDependencies": {
+    "@types/react": "^19.2.7",
+    "@types/react-dom": "^19.2.3",
+    "typescript": "^6.0.3"
+  }
+}

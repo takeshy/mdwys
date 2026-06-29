@@ -1,0 +1,22 @@
+{
+  "tasks": {
+    "dev": "vite --host 127.0.0.1",
+    "build": "vite build",
+    "preview": "vite preview --host 127.0.0.1",
+    "desktop": "deno task build && deno desktop --allow-read=dist --allow-net=127.0.0.1 desktop/main.ts",
+    "desktop:dev": "deno desktop --hmr --allow-read=dist --allow-net=127.0.0.1 desktop/main.ts",
+    "check": "deno check src/main.tsx desktop/main.ts"
+  },
+  "nodeModulesDir": "auto",
+  "unstable": [
+    "detect-cjs",
+    "node-globals",
+    "unsafe-proto",
+    "sloppy-imports"
+  ],
+  "compilerOptions": {
+    "jsx": "react-jsx",
+    "jsxImportSource": "react",
+    "lib": ["dom", "dom.iterable", "deno.ns"]
+  }
+}
