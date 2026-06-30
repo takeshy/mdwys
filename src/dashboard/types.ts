@@ -7,7 +7,7 @@ export interface LayoutPos {
 
 export interface DashboardWidget {
   id: string;
-  type: "file" | "web";
+  type: "file";
   title: string;
   layout: LayoutPos;
   config: Record<string, unknown>;

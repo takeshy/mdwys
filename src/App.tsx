@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Check, LayoutDashboard, Moon, Pencil, Sun, X } from "lucide-react";
+import { Check, Columns2, LayoutDashboard, Moon, Rows2, Sun, X } from "lucide-react";
 import { DashboardView } from "./dashboard/DashboardView";
 import { DASHBOARD_STORAGE_KEY, defaultDashboard, type DashboardData } from "./dashboard/types";
 
 export type MarkdownMode = "preview" | "wysiwyg" | "raw";
+export type EqualizeLayoutDirection = "vertical" | "horizontal";
 
 type CheckpointReason = "initial" | "idle" | "blur" | "manual" | "restore";
 
@@ -57,7 +58,7 @@ function readDashboard(): DashboardData {
     return {
       ...parsed,
       widgets: parsed.widgets
-        .filter((widget) => widget.type !== "note" && widget.type !== "links")
+        .filter((widget) => widget.type !== "note" && widget.type !== "links" && widget.type !== "web")
         .map((widget) => widget.type === "markdown" ? { ...widget, type: "file", title: widget.title || "File" } : widget),
     } as unknown as DashboardData;
   } catch {
@@ -121,12 +122,15 @@ export default function App() {
   const [dashboard, setDashboard] = useState<DashboardData>(() => readDashboard());
   const [savedAt, setSavedAt] = useState<Date | null>(null);
   const [historyOpen, setHistoryOpen] = useState(false);
-  const [dashboardEditMode, setDashboardEditMode] = useState(false);
-  const [addWidgetRequest, setAddWidgetRequest] = useState(0);
+  const [addWidgetRequest, setAddWidgetRequest] = useState<{ id: number; direction: EqualizeLayoutDirection }>({ id: 0, direction: "horizontal" });
+  const [activeLayoutDirection, setActiveLayoutDirection] = useState<EqualizeLayoutDirection>("horizontal");
+  const [equalizeLayoutRequest, setEqualizeLayoutRequest] = useState<{ id: number; direction: EqualizeLayoutDirection }>({ id: 0, direction: "horizontal" });
+  const [splitWidgetRequest, setSplitWidgetRequest] = useState<{ id: number; direction: EqualizeLayoutDirection }>({ id: 0, direction: "horizontal" });
   const [openFilePickerRequest, setOpenFilePickerRequest] = useState(0);
   const [checkpoints, setCheckpoints] = useState<HistoryCheckpoint[]>([]);
   const [isDark, setIsDark] = useState(() => window.matchMedia("(prefers-color-scheme: dark)").matches);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const activeLayoutDirectionRef = useRef<EqualizeLayoutDirection>("horizontal");
   const lastCheckpointHashRef = useRef<string>("");
   const latestStateRef = useRef({ fileName, content, dashboard });
 
@@ -288,24 +292,45 @@ export default function App() {
         </div>
 
         <div className="global-toolbar">
-          {dashboardEditMode && (
-            <button
-              type="button"
-              className="global-command"
-              onClick={() => setAddWidgetRequest((value) => value + 1)}
-              title="Add widget"
-            >
-              <span>+ Add Widget</span>
-            </button>
-          )}
           <button
             type="button"
-            className={`global-command ${dashboardEditMode ? "active" : ""}`}
-            onClick={() => setDashboardEditMode((value) => !value)}
-            title={dashboardEditMode ? "Finish dashboard editing" : "Edit dashboard"}
+            className="global-command"
+            onClick={() => setAddWidgetRequest((value) => ({ id: value.id + 1, direction: activeLayoutDirectionRef.current }))}
+            title="Add widget"
           >
-            {dashboardEditMode ? <Check size={16} /> : <Pencil size={16} />}
-            <span>{dashboardEditMode ? "Done" : "Dashboard Edit"}</span>
+            <span>+ Add Widget</span>
+          </button>
+          <button
+            type="button"
+            className={`icon-button ${activeLayoutDirection === "vertical" ? "active" : ""}`}
+            onClick={() => {
+              if (activeLayoutDirection === "vertical") {
+                setEqualizeLayoutRequest((value) => ({ id: value.id + 1, direction: "vertical" }));
+              } else {
+                activeLayoutDirectionRef.current = "vertical";
+                setActiveLayoutDirection("vertical");
+                setSplitWidgetRequest((value) => ({ id: value.id + 1, direction: "vertical" }));
+              }
+            }}
+            title="縦に均等"
+          >
+            <Rows2 size={18} />
+          </button>
+          <button
+            type="button"
+            className={`icon-button ${activeLayoutDirection === "horizontal" ? "active" : ""}`}
+            onClick={() => {
+              if (activeLayoutDirection === "horizontal") {
+                setEqualizeLayoutRequest((value) => ({ id: value.id + 1, direction: "horizontal" }));
+              } else {
+                activeLayoutDirectionRef.current = "horizontal";
+                setActiveLayoutDirection("horizontal");
+                setSplitWidgetRequest((value) => ({ id: value.id + 1, direction: "horizontal" }));
+              }
+            }}
+            title="横に均等"
+          >
+            <Columns2 size={18} />
           </button>
           <button type="button" className="icon-button" onClick={() => setIsDark((value) => !value)} title="Toggle theme">
             {isDark ? <Sun size={18} /> : <Moon size={18} />}
@@ -341,9 +366,10 @@ export default function App() {
           onExportDocument={exportDocument}
           onHistoryClick={() => setHistoryOpen(true)}
           isDark={isDark}
-          editMode={dashboardEditMode}
-          onEditModeChange={setDashboardEditMode}
           addWidgetRequest={addWidgetRequest}
+          activeLayoutDirection={activeLayoutDirection}
+          equalizeLayoutRequest={equalizeLayoutRequest}
+          splitWidgetRequest={splitWidgetRequest}
           openFilePickerRequest={openFilePickerRequest}
         />
       </section>

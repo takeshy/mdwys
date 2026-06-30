@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import {
   Code,
   Download,
@@ -6,10 +6,11 @@ import {
   FileText,
   FilePlus,
   FolderOpen,
-  Globe,
   GripVertical,
   History,
+  Image,
   Maximize2,
+  Minimize2,
   MoreHorizontal,
   PenLine,
   Save,
@@ -19,16 +20,17 @@ import {
 } from "lucide-react";
 import { MarkdownPreview } from "../components/MarkdownPreview";
 import { WysiwygEditor } from "../components/WysiwygEditor";
-import type { MarkdownMode } from "../App";
+import type { EqualizeLayoutDirection, MarkdownMode } from "../App";
 import type { DashboardData, DashboardWidget, LayoutPos } from "./types";
 
 const COLS = 12;
 const ROW_HEIGHT = 86;
+const MIN_ROW_HEIGHT = 44;
 const GAP = 8;
+const MAX_WIDGETS = 9;
 
 const widgetDefs = [
   { type: "file" as const, label: "File", icon: FileText, size: { w: 7, h: 5 } },
-  { type: "web" as const, label: "Web", icon: Globe, size: { w: 5, h: 4 } },
 ];
 
 interface RecentFile {
@@ -76,17 +78,66 @@ function readFileMode(fileName: string): MarkdownMode {
   return lowerName.endsWith(".md") || lowerName.endsWith(".markdown") ? "wysiwyg" : "preview";
 }
 
-function widgetDefaults(type: DashboardWidget["type"], maxY: number): DashboardWidget {
+function isImageFileName(fileName: string) {
+  return /\.(avif|bmp|gif|jpe?g|png|svg|webp)$/i.test(fileName);
+}
+
+function rectIsFree(widgets: DashboardWidget[], x: number, y: number, w: number, h: number) {
+  return widgets.every((widget) => {
+    const layout = widget.layout;
+    return x + w <= layout.x || layout.x + layout.w <= x || y + h <= layout.y || layout.y + layout.h <= y;
+  });
+}
+
+function nextWidgetLayout(type: DashboardWidget["type"], widgets: DashboardWidget[], direction: EqualizeLayoutDirection): LayoutPos {
   const def = widgetDefs.find((item) => item.type === type) ?? widgetDefs[0];
-  const defaultConfig = type === "web" ? { url: "https://deno.com/" } : {};
+  const height = widgets.length > 0 && widgets.every((widget) => widget.layout.h === 1) ? 1 : def.size.h;
+  const maxY = widgets.reduce((max, widget) => Math.max(max, widget.layout.y + widget.layout.h), 0);
+
+  if (direction === "vertical") return { x: 0, y: maxY, w: COLS, h: height };
+
+  const slotWidth = COLS / 3;
+  const candidateRows = [...new Set(widgets.map((widget) => widget.layout.y)), maxY].sort((a, b) => a - b);
+
+  for (const y of candidateRows) {
+    for (const x of [0, slotWidth, slotWidth * 2]) {
+      if (rectIsFree(widgets, x, y, slotWidth, height)) return { x, y, w: slotWidth, h: height };
+    }
+  }
+
+  return { x: 0, y: maxY, w: slotWidth, h: height };
+}
+
+function widgetDefaults(type: DashboardWidget["type"], widgets: DashboardWidget[], direction: EqualizeLayoutDirection): DashboardWidget {
+  const def = widgetDefs.find((item) => item.type === type) ?? widgetDefs[0];
 
   return {
     id: crypto.randomUUID(),
     type,
     title: def.label,
-    layout: { x: 0, y: maxY, ...def.size },
-    config: defaultConfig,
+    layout: nextWidgetLayout(type, widgets, direction),
+    config: {},
   };
+}
+
+function HtmlDocumentFrame({ content, title }: { content: string; title: string }) {
+  const [url, setUrl] = useState("");
+
+  useEffect(() => {
+    if (!content) {
+      setUrl("");
+      return;
+    }
+
+    const blob = new Blob([content], { type: "text/html;charset=utf-8" });
+    const nextUrl = URL.createObjectURL(blob);
+    setUrl(nextUrl);
+    return () => URL.revokeObjectURL(nextUrl);
+  }, [content]);
+
+  if (!url) return <div className="dashboard-empty">Open an HTML file.</div>;
+
+  return <iframe className="dashboard-web" src={url} title={title} sandbox="allow-scripts allow-same-origin allow-forms allow-popups" />;
 }
 
 function WidgetBody({
@@ -112,9 +163,20 @@ function WidgetBody({
     const isMarkdown = lowerName.endsWith(".md") || lowerName.endsWith(".markdown");
     const isHtml = lowerName.endsWith(".html") || lowerName.endsWith(".htm");
     const isPdf = lowerName.endsWith(".pdf");
+    const isImage = isImageFileName(fileName);
 
     if (isHtml) {
-      return <iframe className="dashboard-web" srcDoc={documentContent} title={fileName} sandbox="allow-scripts allow-same-origin allow-forms" />;
+      return <HtmlDocumentFrame content={documentContent} title={fileName} />;
+    }
+
+    if (isImage) {
+      return documentContent ? (
+        <div className="dashboard-image-frame">
+          <img className="dashboard-image" src={documentContent} alt={fileName} />
+        </div>
+      ) : (
+        <div className="dashboard-empty">Open an image file.</div>
+      );
     }
 
     if (isPdf) {
@@ -159,15 +221,6 @@ function WidgetBody({
     );
   }
 
-  if (widget.type === "web") {
-    const url = typeof widget.config.url === "string" ? widget.config.url : "";
-    return url ? (
-      <iframe className="dashboard-web" src={url} title={widget.title} sandbox="allow-scripts allow-same-origin allow-forms" />
-    ) : (
-      <div className="dashboard-empty">No URL.</div>
-    );
-  }
-
   return null;
 }
 
@@ -176,7 +229,7 @@ function readPickedFile(file: File, onLoad: (fileName: string, content: string, 
   reader.addEventListener("load", () => {
     onLoad(file.name || "document.txt", String(reader.result ?? ""), readFileMode(file.name));
   });
-  if (file.name.toLowerCase().endsWith(".pdf")) reader.readAsDataURL(file);
+  if (file.name.toLowerCase().endsWith(".pdf") || isImageFileName(file.name)) reader.readAsDataURL(file);
   else reader.readAsText(file);
 }
 
@@ -240,7 +293,7 @@ function FilePickerDialog({
             {filteredFiles.length ? (
               filteredFiles.map((file) => (
                 <button key={file.id} type="button" className="file-picker-item" onClick={() => onSelect(file)}>
-                  <FileText size={18} />
+                  {isImageFileName(file.fileName) ? <Image size={18} /> : <FileText size={18} />}
                   <span>{file.fileName}</span>
                   <small>{file.updatedAt.toLocaleTimeString()}</small>
                 </button>
@@ -273,9 +326,10 @@ export function DashboardView({
   onExportDocument,
   onHistoryClick,
   isDark,
-  editMode,
-  onEditModeChange,
   addWidgetRequest,
+  activeLayoutDirection,
+  equalizeLayoutRequest,
+  splitWidgetRequest,
   openFilePickerRequest,
 }: {
   data: DashboardData;
@@ -292,27 +346,36 @@ export function DashboardView({
   onExportDocument: () => void;
   onHistoryClick: () => void;
   isDark: boolean;
-  editMode: boolean;
-  onEditModeChange: (value: boolean) => void;
-  addWidgetRequest: number;
+  addWidgetRequest: { id: number; direction: EqualizeLayoutDirection };
+  activeLayoutDirection: EqualizeLayoutDirection;
+  equalizeLayoutRequest: { id: number; direction: EqualizeLayoutDirection };
+  splitWidgetRequest: { id: number; direction: EqualizeLayoutDirection };
   openFilePickerRequest: number;
 }) {
-  const [paletteOpen, setPaletteOpen] = useState(false);
   const [moreOpenId, setMoreOpenId] = useState<string | null>(null);
+  const [maximizedWidgetId, setMaximizedWidgetId] = useState<string | null>(null);
+  const [activeWidgetId, setActiveWidgetId] = useState<string | null>(null);
   const gridRef = useRef<HTMLDivElement | null>(null);
   const pickerInputRef = useRef<HTMLInputElement | null>(null);
   const seededRecentFilesRef = useRef(false);
+  const handledAddWidgetRequestRef = useRef(0);
+  const handledEqualizeLayoutRequestRef = useRef(0);
+  const handledSplitWidgetRequestRef = useRef(0);
   const [recentFiles, setRecentFiles] = useState<RecentFile[]>([]);
   const [filePickerTargetId, setFilePickerTargetId] = useState<string | null>(null);
+  const [filePickerCreatesWidget, setFilePickerCreatesWidget] = useState(false);
+  const [filePickerCreateDirection, setFilePickerCreateDirection] = useState<EqualizeLayoutDirection>("horizontal");
   const [filePickerQuery, setFilePickerQuery] = useState("");
+  const [gridRowHeight, setGridRowHeight] = useState(ROW_HEIGHT);
   const [dragging, setDragging] = useState<
     { id: string; mode: "move" | "resize"; pointerId: number; x: number; y: number; origin: LayoutPos; dx: number; dy: number; next: LayoutPos } | null
   >(null);
 
-  const maxY = useMemo(
-    () => data.widgets.reduce((max, widget) => Math.max(max, widget.layout.y + widget.layout.h), 0),
-    [data.widgets],
-  );
+  const fitGridRows = useCallback((rows: number) => {
+    const safeRows = Math.max(1, rows);
+    const availableHeight = gridRef.current?.parentElement?.clientHeight ?? safeRows * (ROW_HEIGHT + GAP);
+    setGridRowHeight(Math.max(MIN_ROW_HEIGHT, Math.floor((availableHeight - GAP * (safeRows - 1)) / safeRows)));
+  }, []);
 
   const updateWidget = useCallback(
     (nextWidget: DashboardWidget) => {
@@ -366,37 +429,27 @@ export function DashboardView({
       const nextTargetId = targetId ?? fallbackTarget;
       if (nextTargetId) {
         setFilePickerTargetId(nextTargetId);
+        setFilePickerCreatesWidget(false);
         setFilePickerQuery("");
         return;
       }
 
-      const nextWidget = widgetDefaults("file", maxY);
-      onChange({ widgets: [...data.widgets, nextWidget] });
-      onEditModeChange(true);
-      setFilePickerTargetId(nextWidget.id);
-      setFilePickerQuery("");
-    },
-    [data.widgets, maxY, onChange, onEditModeChange],
-  );
-
-  const applyPickedFile = useCallback(
-    (fileName: string, content: string, mode: MarkdownMode) => {
-      if (!filePickerTargetId) return;
-      updateFileWidget(filePickerTargetId, { fileName, content, mode });
       setFilePickerTargetId(null);
+      setFilePickerCreatesWidget(true);
+      setFilePickerCreateDirection(activeLayoutDirection);
       setFilePickerQuery("");
     },
-    [filePickerTargetId, updateFileWidget],
+    [activeLayoutDirection, data.widgets],
   );
 
   const getGridMetrics = useCallback(() => {
     const rect = gridRef.current?.getBoundingClientRect();
-    if (!rect) return { cellW: 96, cellH: ROW_HEIGHT };
+    if (!rect) return { cellW: 96, cellH: gridRowHeight };
     return {
       cellW: (rect.width - GAP * (COLS - 1)) / COLS,
-      cellH: ROW_HEIGHT,
+      cellH: gridRowHeight,
     };
-  }, []);
+  }, [gridRowHeight]);
 
   const layoutForPointer = useCallback(
     (event: PointerEvent, current: NonNullable<typeof dragging>) => {
@@ -447,15 +500,249 @@ export function DashboardView({
     };
   }, [commitPointer, dragging, layoutForPointer]);
 
-  const addWidget = (type: DashboardWidget["type"]) => {
-    onChange({ widgets: [...data.widgets, widgetDefaults(type, maxY)] });
-    setPaletteOpen(false);
-    onEditModeChange(true);
+  const buildEqualizedWidgets = useCallback((widgets: DashboardWidget[], direction: EqualizeLayoutDirection) => {
+    const count = widgets.length;
+    if (count === 0) return widgets;
+
+    const primarySlots = Math.min(3, count);
+    const groups = Array.from({ length: primarySlots }, () => [] as DashboardWidget[]);
+    widgets.forEach((widget, index) => {
+      groups[index % primarySlots].push(widget);
+    });
+    const maxGroupSize = Math.max(...groups.map((group) => group.length));
+    const gridRows = direction === "vertical" ? primarySlots : maxGroupSize;
+
+    setMaximizedWidgetId(null);
+    setDragging(null);
+    fitGridRows(gridRows);
+
+    const layouts = new Map<string, LayoutPos>();
+    groups.forEach((group, primaryIndex) => {
+      if (direction === "vertical") {
+        const slotWidth = Math.max(1, Math.floor(COLS / group.length));
+        group.forEach((widget, groupIndex) => {
+          const x = groupIndex * slotWidth;
+          const w = groupIndex === group.length - 1 ? COLS - x : slotWidth;
+          layouts.set(widget.id, clampLayout({ x, y: primaryIndex, w, h: 1 }));
+        });
+        return;
+      }
+
+      const slotWidth = Math.max(1, Math.floor(COLS / primarySlots));
+      const x = primaryIndex * slotWidth;
+      const w = primaryIndex === primarySlots - 1 ? COLS - x : slotWidth;
+      group.forEach((widget, groupIndex) => {
+        layouts.set(widget.id, clampLayout({
+          x,
+          y: groupIndex,
+          w,
+          h: group.length === 1 ? maxGroupSize : 1,
+        }));
+      });
+    });
+
+    return widgets.map((widget) => ({
+      ...widget,
+      layout: layouts.get(widget.id) ?? widget.layout,
+    }));
+  }, [fitGridRows]);
+
+  const buildSplitWidgets = useCallback((widgets: DashboardWidget[], selectedId: string, direction: EqualizeLayoutDirection) => {
+    if (widgets.length <= 1) return widgets;
+    const selected = widgets.find((widget) => widget.id === selectedId);
+    if (!selected) return widgets;
+
+    const others = widgets.filter((widget) => widget.id !== selectedId);
+    const layouts = new Map<string, LayoutPos>();
+
+    setMaximizedWidgetId(null);
+    setDragging(null);
+
+    if (direction === "horizontal") {
+      const rows = Math.max(1, Math.min(3, others.length));
+      const groups = Array.from({ length: rows }, () => [] as DashboardWidget[]);
+      others.forEach((widget, index) => groups[index % rows].push(widget));
+      fitGridRows(rows);
+
+      layouts.set(selected.id, clampLayout({ x: 8, y: 0, w: 4, h: rows }));
+      groups.forEach((group, rowIndex) => {
+        const slotWidth = Math.max(1, Math.floor(8 / group.length));
+        group.forEach((widget, groupIndex) => {
+          const x = groupIndex * slotWidth;
+          const w = groupIndex === group.length - 1 ? 8 - x : slotWidth;
+          layouts.set(widget.id, clampLayout({ x, y: rowIndex, w, h: 1 }));
+        });
+      });
+    } else {
+      const columns = Math.max(1, Math.min(3, others.length));
+      const groups = Array.from({ length: columns }, () => [] as DashboardWidget[]);
+      others.forEach((widget, index) => groups[index % columns].push(widget));
+      const maxGroupSize = Math.max(1, ...groups.map((group) => group.length));
+      fitGridRows(maxGroupSize + 1);
+
+      layouts.set(selected.id, clampLayout({ x: 0, y: maxGroupSize, w: COLS, h: 1 }));
+      const slotWidth = Math.max(1, Math.floor(COLS / columns));
+      groups.forEach((group, columnIndex) => {
+        const x = columnIndex * slotWidth;
+        const w = columnIndex === columns - 1 ? COLS - x : slotWidth;
+        group.forEach((widget, rowIndex) => {
+          layouts.set(widget.id, clampLayout({
+            x,
+            y: rowIndex,
+            w,
+            h: group.length === 1 ? maxGroupSize : 1,
+          }));
+        });
+      });
+    }
+
+    return widgets.map((widget) => ({
+      ...widget,
+      layout: layouts.get(widget.id) ?? widget.layout,
+    }));
+  }, [fitGridRows]);
+
+  const buildAddedWidgets = useCallback((widgets: DashboardWidget[], nextWidget: DashboardWidget, direction: EqualizeLayoutDirection) => {
+    const layouts = new Map<string, LayoutPos>();
+    const FIT_ROWS = 6;
+
+    if (direction === "vertical") {
+      const columns = [...new Set(widgets.map((widget) => widget.layout.x))]
+        .sort((a, b) => a - b)
+        .map((x) => widgets.filter((widget) => widget.layout.x === x).sort((a, b) => a.layout.y - b.layout.y));
+      if (columns.length === 0) columns.push([]);
+
+      let targetIndex = columns
+        .map((column, index) => ({ index, size: column.length }))
+        .filter((item) => item.size < 3)
+        .sort((a, b) => a.size - b.size || a.index - b.index)[0]?.index;
+      if (targetIndex === undefined && columns.length < 3) {
+        columns.push([]);
+        targetIndex = columns.length - 1;
+      }
+      columns[targetIndex ?? 0].push(nextWidget);
+
+      const columnCount = Math.min(3, columns.length);
+      const slotWidth = Math.floor(COLS / columnCount);
+      columns.slice(0, columnCount).forEach((column, columnIndex) => {
+        const itemCount = Math.max(1, Math.min(3, column.length));
+        const slotHeight = Math.floor(FIT_ROWS / itemCount);
+        const x = columnIndex * slotWidth;
+        const w = columnIndex === columnCount - 1 ? COLS - x : slotWidth;
+        column.slice(0, 3).forEach((widget, rowIndex) => {
+          const y = rowIndex * slotHeight;
+          const h = rowIndex === itemCount - 1 ? FIT_ROWS - y : slotHeight;
+          layouts.set(widget.id, clampLayout({ x, y, w, h }));
+        });
+      });
+    } else {
+      const rows = [...new Set(widgets.map((widget) => widget.layout.y))]
+        .sort((a, b) => a - b)
+        .map((y) => widgets.filter((widget) => widget.layout.y === y).sort((a, b) => a.layout.x - b.layout.x));
+      if (rows.length === 0) rows.push([]);
+
+      let targetIndex = rows
+        .map((row, index) => ({ index, size: row.length }))
+        .filter((item) => item.size < 3)
+        .sort((a, b) => a.size - b.size || a.index - b.index)[0]?.index;
+      if (targetIndex === undefined && rows.length < 3) {
+        rows.push([]);
+        targetIndex = rows.length - 1;
+      }
+      rows[targetIndex ?? 0].push(nextWidget);
+
+      const rowCount = Math.min(3, rows.length);
+      const rowHeight = Math.floor(FIT_ROWS / rowCount);
+      rows.slice(0, 3).forEach((row, rowIndex) => {
+        const rowCount = Math.min(3, row.length);
+        const slotWidth = Math.floor(COLS / Math.max(1, rowCount));
+        const y = rowIndex * rowHeight;
+        const h = rowIndex === rows.length - 1 ? FIT_ROWS - y : rowHeight;
+        row.slice(0, 3).forEach((widget, columnIndex) => {
+          const x = columnIndex * slotWidth;
+          const w = columnIndex === rowCount - 1 ? COLS - x : slotWidth;
+          layouts.set(widget.id, clampLayout({ x, y, w, h }));
+        });
+      });
+    }
+
+    const nextWidgets = [...widgets, nextWidget].map((widget) => ({
+      ...widget,
+      layout: layouts.get(widget.id) ?? widget.layout,
+    }));
+    const rows = nextWidgets.reduce((max, widget) => Math.max(max, widget.layout.y + widget.layout.h), 1);
+    setMaximizedWidgetId(null);
+    setDragging(null);
+    fitGridRows(rows);
+    return nextWidgets;
+  }, [fitGridRows]);
+
+  const applyPickedFile = useCallback(
+    (fileName: string, content: string, mode: MarkdownMode) => {
+      if (filePickerCreatesWidget) {
+        const createDirection = filePickerCreateDirection;
+        const nextWidget = {
+          ...widgetDefaults("file", data.widgets, createDirection),
+          config: { fileName, content, mode },
+        };
+        onChange({ widgets: buildAddedWidgets(data.widgets, nextWidget, createDirection) });
+        recordRecentFile(fileName, content, mode);
+        setActiveWidgetId(nextWidget.id);
+      } else if (filePickerTargetId) {
+        updateFileWidget(filePickerTargetId, { fileName, content, mode });
+      }
+      setFilePickerTargetId(null);
+      setFilePickerCreatesWidget(false);
+      setFilePickerCreateDirection(activeLayoutDirection);
+      setFilePickerQuery("");
+    },
+    [activeLayoutDirection, buildAddedWidgets, data.widgets, filePickerCreateDirection, filePickerCreatesWidget, filePickerTargetId, onChange, recordRecentFile, updateFileWidget],
+  );
+
+  const addWidget = (type: DashboardWidget["type"], direction: EqualizeLayoutDirection) => {
+    if (data.widgets.length >= MAX_WIDGETS) return;
+    if (type === "file") {
+      setFilePickerTargetId(null);
+      setFilePickerCreatesWidget(true);
+      setFilePickerCreateDirection(direction);
+      setFilePickerQuery("");
+    }
   };
 
+  const equalizeLayout = useCallback((direction: EqualizeLayoutDirection) => {
+    onChange({ widgets: buildEqualizedWidgets(data.widgets, direction) });
+  }, [buildEqualizedWidgets, data.widgets, onChange]);
+
   useEffect(() => {
-    if (addWidgetRequest > 0) setPaletteOpen(true);
-  }, [addWidgetRequest]);
+    if (addWidgetRequest.id <= handledAddWidgetRequestRef.current) return;
+    handledAddWidgetRequestRef.current = addWidgetRequest.id;
+    addWidget("file", addWidgetRequest.direction);
+  }, [activeLayoutDirection, addWidget, addWidgetRequest]);
+
+  useEffect(() => {
+    if (equalizeLayoutRequest.id <= handledEqualizeLayoutRequestRef.current) return;
+    handledEqualizeLayoutRequestRef.current = equalizeLayoutRequest.id;
+    if (activeWidgetId) {
+      onChange({ widgets: buildSplitWidgets(data.widgets, activeWidgetId, equalizeLayoutRequest.direction) });
+      return;
+    }
+    equalizeLayout(equalizeLayoutRequest.direction);
+  }, [activeWidgetId, buildSplitWidgets, data.widgets, equalizeLayout, equalizeLayoutRequest, onChange]);
+
+  useEffect(() => {
+    if (splitWidgetRequest.id <= handledSplitWidgetRequestRef.current) return;
+    handledSplitWidgetRequestRef.current = splitWidgetRequest.id;
+    if (!activeWidgetId) return;
+    onChange({ widgets: buildSplitWidgets(data.widgets, activeWidgetId, splitWidgetRequest.direction) });
+  }, [activeWidgetId, buildSplitWidgets, data.widgets, onChange, splitWidgetRequest]);
+
+  useEffect(() => {
+    if (activeWidgetId && !data.widgets.some((widget) => widget.id === activeWidgetId)) {
+      setActiveWidgetId(null);
+    }
+    const rows = data.widgets.reduce((max, widget) => Math.max(max, widget.layout.y + widget.layout.h), 1);
+    fitGridRows(rows);
+  }, [activeWidgetId, data.widgets, fitGridRows]);
 
   useEffect(() => {
     if (openFilePickerRequest > 0) openFilePicker();
@@ -471,6 +758,15 @@ export function DashboardView({
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [openFilePicker]);
+
+  useEffect(() => {
+    if (!maximizedWidgetId) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setMaximizedWidgetId(null);
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [maximizedWidgetId]);
 
   const markdownModes: Array<{ key: MarkdownMode; label: string; icon: LucideIcon }> = [
     { key: "preview", label: "Preview", icon: Eye },
@@ -492,7 +788,7 @@ export function DashboardView({
         ref={pickerInputRef}
         type="file"
         className="hidden-input"
-        accept=".md,.markdown,.html,.htm,.pdf,.txt,text/markdown,text/html,text/plain,application/pdf,*/*"
+        accept=".md,.markdown,.html,.htm,.pdf,.txt,.png,.jpg,.jpeg,.gif,.webp,.avif,.bmp,.svg,text/markdown,text/html,text/plain,application/pdf,image/*,*/*"
         onChange={(event) => {
           const file = event.currentTarget.files?.[0];
           if (file) readPickedFile(file, applyPickedFile);
@@ -503,9 +799,10 @@ export function DashboardView({
         <div
           ref={gridRef}
           className="dashboard-grid"
+          onClick={() => setActiveWidgetId(null)}
           style={{
             gridTemplateColumns: `repeat(${COLS}, minmax(0, 1fr))`,
-            gridAutoRows: `${ROW_HEIGHT}px`,
+            gridAutoRows: `${gridRowHeight}px`,
             gap: GAP,
           }}
         >
@@ -518,6 +815,7 @@ export function DashboardView({
                 : readFileMode(widgetFileName);
               const fileIsMarkdown = widgetFileName.toLowerCase().endsWith(".md") || widgetFileName.toLowerCase().endsWith(".markdown");
               const updateFileConfig = (next: Record<string, unknown>) => updateFileWidget(widget.id, next);
+              const isMaximized = maximizedWidgetId === widget.id;
               const handleAction = (id: string) => {
                 if (id === "new") {
                   updateFileConfig({ fileName: "untitled.md", content: "# Untitled\n\n", mode: "wysiwyg" });
@@ -531,50 +829,48 @@ export function DashboardView({
                   onHistoryClick();
                 }
               };
+              const beginMove = (event: ReactPointerEvent<HTMLButtonElement>) => {
+                if (isMaximized) return;
+                event.preventDefault();
+                event.stopPropagation();
+                event.currentTarget.setPointerCapture(event.pointerId);
+                setDragging({
+                  id: widget.id,
+                  mode: "move",
+                  pointerId: event.pointerId,
+                  x: event.clientX,
+                  y: event.clientY,
+                  origin: widget.layout,
+                  dx: 0,
+                  dy: 0,
+                  next: widget.layout,
+                });
+              };
 
               return (
             <article
               key={widget.id}
-              className={`dashboard-widget ${editMode ? "editing" : ""} ${dragging?.id === widget.id ? "interacting" : ""}`}
+              className={`dashboard-widget ${activeWidgetId === widget.id ? "active" : ""} ${isMaximized ? "maximized" : ""} ${dragging?.id === widget.id ? "interacting" : ""}`}
               style={{
-                gridColumn: `${widget.layout.x + 1} / span ${widget.layout.w}`,
-                gridRow: `${widget.layout.y + 1} / span ${widget.layout.h}`,
-                transform: dragging?.id === widget.id && dragging.mode === "move" ? `translate(${dragging.dx}px, ${dragging.dy}px)` : undefined,
-                width: dragging?.id === widget.id && dragging.mode === "resize"
+                gridColumn: isMaximized ? undefined : `${widget.layout.x + 1} / span ${widget.layout.w}`,
+                gridRow: isMaximized ? undefined : `${widget.layout.y + 1} / span ${widget.layout.h}`,
+                transform: !isMaximized && dragging?.id === widget.id && dragging.mode === "move" ? `translate(${dragging.dx}px, ${dragging.dy}px)` : undefined,
+                width: !isMaximized && dragging?.id === widget.id && dragging.mode === "resize"
                   ? `${dragging.next.w * getGridMetrics().cellW + (dragging.next.w - 1) * GAP}px`
                   : undefined,
-                height: dragging?.id === widget.id && dragging.mode === "resize"
+                height: !isMaximized && dragging?.id === widget.id && dragging.mode === "resize"
                   ? `${dragging.next.h * getGridMetrics().cellH + (dragging.next.h - 1) * GAP}px`
                   : undefined,
                 touchAction: dragging?.id === widget.id ? "none" : undefined,
               }}
             >
-              {editMode && (
-                <button
-                  type="button"
-                  className="dashboard-move-handle"
-                  onPointerDown={(event) => {
-                    event.preventDefault();
-                    event.stopPropagation();
-                    event.currentTarget.setPointerCapture(event.pointerId);
-                    setDragging({
-                      id: widget.id,
-                      mode: "move",
-                      pointerId: event.pointerId,
-                      x: event.clientX,
-                      y: event.clientY,
-                      origin: widget.layout,
-                      dx: 0,
-                      dy: 0,
-                      next: widget.layout,
-                    });
-                  }}
-                  title="Move"
-                >
-                  <GripVertical size={15} />
-                </button>
-              )}
-              <header className="dashboard-widget-header">
+              <header
+                className="dashboard-widget-header"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  setActiveWidgetId(widget.id);
+                }}
+              >
                 {widget.type === "file" ? (
                   <div className="markdown-widget-header-main">
                     <input
@@ -670,17 +966,31 @@ export function DashboardView({
                     </div>
                   </div>
                 )}
-                {editMode && (
-                  <div className="dashboard-widget-tools">
-                    <button
-                      type="button"
-                      onClick={() => onChange({ widgets: data.widgets.filter((item) => item.id !== widget.id) })}
-                      title="Delete"
-                    >
-                      <Trash2 size={15} />
-                    </button>
-                  </div>
+                {!isMaximized && (
+                  <button type="button" className="dashboard-move-handle" onPointerDown={beginMove} title="Move">
+                    <GripVertical size={15} />
+                  </button>
                 )}
+                <div className="dashboard-widget-tools">
+                  <button
+                    type="button"
+                    onClick={() => setMaximizedWidgetId((id) => (id === widget.id ? null : widget.id))}
+                    title={isMaximized ? "Restore" : "Maximize"}
+                  >
+                    {isMaximized ? <Minimize2 size={15} /> : <Maximize2 size={15} />}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setMaximizedWidgetId((id) => (id === widget.id ? null : id));
+                      setActiveWidgetId((id) => (id === widget.id ? null : id));
+                      onChange({ widgets: data.widgets.filter((item) => item.id !== widget.id) });
+                    }}
+                    title="Delete"
+                  >
+                    <Trash2 size={15} />
+                  </button>
+                </div>
               </header>
               <div className="dashboard-widget-body">
                 <WidgetBody
@@ -691,7 +1001,7 @@ export function DashboardView({
                   onConfigChange={(config) => updateFileWidget(widget.id, config)}
                 />
               </div>
-              {editMode && (
+              {!isMaximized && (
                 <button
                   type="button"
                   className="dashboard-resize"
@@ -723,33 +1033,18 @@ export function DashboardView({
         </div>
       </div>
 
-      {paletteOpen && (
-        <div className="dashboard-modal-backdrop" onClick={() => setPaletteOpen(false)}>
-          <div className="dashboard-palette" onClick={(event) => event.stopPropagation()}>
-            <strong>Add widget</strong>
-            <div className="dashboard-palette-grid">
-              {widgetDefs.map((def) => {
-                const Icon = def.icon;
-                return (
-                  <button key={def.type} type="button" onClick={() => addWidget(def.type)}>
-                    <Icon size={22} />
-                    <span>{def.label}</span>
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-        </div>
-      )}
-
-      {filePickerTargetId && (
+      {(filePickerTargetId || filePickerCreatesWidget) && (
         <FilePickerDialog
           query={filePickerQuery}
           recentFiles={recentFiles}
           onQueryChange={setFilePickerQuery}
           onBrowse={() => pickerInputRef.current?.click()}
           onSelect={(file) => applyPickedFile(file.fileName, file.content, file.mode)}
-          onClose={() => setFilePickerTargetId(null)}
+          onClose={() => {
+            setFilePickerTargetId(null);
+            setFilePickerCreatesWidget(false);
+            setFilePickerCreateDirection(activeLayoutDirection);
+          }}
         />
       )}
     </section>
