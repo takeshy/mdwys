@@ -1,13 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Check, Columns2, LayoutDashboard, Moon, Rows2, Sun, X } from "lucide-react";
+import { Check, Columns2, LayoutDashboard, Moon, Rows2, Settings, Sun, X } from "lucide-react";
 import { DashboardView } from "./dashboard/DashboardView";
 import { DASHBOARD_STORAGE_KEY, defaultDashboard, type DashboardData } from "./dashboard/types";
-import { epubToHtml, isEpubFileName } from "./lib/epub";
+import { selectExternalEditor } from "./lib/wailsBackend";
 
 export type MarkdownMode = "preview" | "wysiwyg" | "raw";
 export type EqualizeLayoutDirection = "vertical" | "horizontal";
 
-type CheckpointReason = "initial" | "idle" | "blur" | "manual" | "restore";
+type CheckpointReason = "initial" | "idle" | "blur" | "manual" | "restore" | "reload";
+type DiffViewMode = "unified" | "split";
 
 interface HistoryCheckpoint {
   id: string;
@@ -18,8 +19,27 @@ interface HistoryCheckpoint {
   dashboard: DashboardData;
 }
 
+interface DiffLine {
+  type: "unchanged" | "added" | "removed";
+  content: string;
+  oldLineNum: number | null;
+  newLineNum: number | null;
+}
+
+interface SplitDiffRow {
+  left: DiffLine | null;
+  right: DiffLine | null;
+}
+
+interface DiffTarget {
+  label: string;
+  before: string;
+  after: string;
+}
+
 const STORAGE_KEY = "mdwys:document";
 const NAME_KEY = "mdwys:fileName";
+const EXTERNAL_EDITOR_KEY = "mdwys:externalEditorPath";
 
 const initialMarkdown = `# mdwys
 
@@ -147,6 +167,8 @@ function reasonLabel(reason: CheckpointReason): string {
       return "Saved";
     case "restore":
       return "Restored";
+    case "reload":
+      return "Reloaded";
   }
 }
 
@@ -157,6 +179,259 @@ function changedSummary(current: HistoryCheckpoint, previous?: HistoryCheckpoint
   if (current.content !== previous.content) changes.push("document");
   if (JSON.stringify(current.dashboard) !== JSON.stringify(previous.dashboard)) changes.push("dashboard");
   return changes.length ? changes.join(", ") : "No content change";
+}
+
+function uniqueCheckpoints(items: HistoryCheckpoint[]): HistoryCheckpoint[] {
+  const result: HistoryCheckpoint[] = [];
+  let previousHash = "";
+  for (const item of items) {
+    const hash = checkpointHash(item.fileName, item.content, item.dashboard);
+    if (hash === previousHash) continue;
+    previousHash = hash;
+    result.push(item);
+  }
+  return result;
+}
+
+function buildLineDiff(before: string, after: string): DiffLine[] {
+  const oldLines = before.split("\n");
+  const newLines = after.split("\n");
+  const rows = oldLines.length;
+  const cols = newLines.length;
+  const table = Array.from({ length: rows + 1 }, () => Array(cols + 1).fill(0) as number[]);
+
+  for (let i = rows - 1; i >= 0; i--) {
+    for (let j = cols - 1; j >= 0; j--) {
+      table[i][j] = oldLines[i] === newLines[j]
+        ? table[i + 1][j + 1] + 1
+        : Math.max(table[i + 1][j], table[i][j + 1]);
+    }
+  }
+
+  const result: DiffLine[] = [];
+  let oldIndex = 0;
+  let newIndex = 0;
+  while (oldIndex < rows && newIndex < cols) {
+    if (oldLines[oldIndex] === newLines[newIndex]) {
+      result.push({ type: "unchanged", content: oldLines[oldIndex], oldLineNum: oldIndex + 1, newLineNum: newIndex + 1 });
+      oldIndex++;
+      newIndex++;
+    } else if (table[oldIndex + 1][newIndex] >= table[oldIndex][newIndex + 1]) {
+      result.push({ type: "removed", content: oldLines[oldIndex], oldLineNum: oldIndex + 1, newLineNum: null });
+      oldIndex++;
+    } else {
+      result.push({ type: "added", content: newLines[newIndex], oldLineNum: null, newLineNum: newIndex + 1 });
+      newIndex++;
+    }
+  }
+  while (oldIndex < rows) {
+    result.push({ type: "removed", content: oldLines[oldIndex], oldLineNum: oldIndex + 1, newLineNum: null });
+    oldIndex++;
+  }
+  while (newIndex < cols) {
+    result.push({ type: "added", content: newLines[newIndex], oldLineNum: null, newLineNum: newIndex + 1 });
+    newIndex++;
+  }
+  return result;
+}
+
+function splitDiffRows(lines: DiffLine[]): SplitDiffRow[] {
+  const rows: SplitDiffRow[] = [];
+  let index = 0;
+  while (index < lines.length) {
+    if (lines[index].type === "unchanged") {
+      rows.push({ left: lines[index], right: lines[index] });
+      index++;
+      continue;
+    }
+
+    const removed: DiffLine[] = [];
+    const added: DiffLine[] = [];
+    while (index < lines.length && lines[index].type === "removed") {
+      removed.push(lines[index]);
+      index++;
+    }
+    while (index < lines.length && lines[index].type === "added") {
+      added.push(lines[index]);
+      index++;
+    }
+
+    const count = Math.max(removed.length, added.length);
+    for (let i = 0; i < count; i++) {
+      rows.push({ left: removed[i] ?? null, right: added[i] ?? null });
+    }
+  }
+  return rows;
+}
+
+function diffStats(lines: DiffLine[]) {
+  return {
+    additions: lines.filter((line) => line.type === "added").length,
+    deletions: lines.filter((line) => line.type === "removed").length,
+  };
+}
+
+function dashboardWidgetContent(widget: DashboardData["widgets"][number]): string | null {
+  return typeof widget.config.content === "string" ? widget.config.content : null;
+}
+
+function dashboardWidgetLabel(widget: DashboardData["widgets"][number]): string {
+  const fileName = typeof widget.config.fileName === "string" && widget.config.fileName.trim()
+    ? widget.config.fileName
+    : widget.title;
+  return fileName || "Widget";
+}
+
+function checkpointDiffTargets(previous: HistoryCheckpoint, checkpoint: HistoryCheckpoint): DiffTarget[] {
+  const targets: DiffTarget[] = [];
+  if (previous.content !== checkpoint.content) {
+    targets.push({ label: "Document", before: previous.content, after: checkpoint.content });
+  }
+
+  const previousWidgets = new Map(previous.dashboard.widgets.map((widget) => [widget.id, widget]));
+  for (const widget of checkpoint.dashboard.widgets) {
+    const previousWidget = previousWidgets.get(widget.id);
+    if (!previousWidget) continue;
+    const before = dashboardWidgetContent(previousWidget);
+    const after = dashboardWidgetContent(widget);
+    if (before === null || after === null || before === after) continue;
+    targets.push({ label: dashboardWidgetLabel(widget), before, after });
+  }
+
+  return targets;
+}
+
+function checkpointDiffStats(previous?: HistoryCheckpoint, checkpoint?: HistoryCheckpoint) {
+  if (!previous || !checkpoint) return { additions: 0, deletions: 0 };
+  return checkpointDiffTargets(previous, checkpoint).reduce(
+    (total, target) => {
+      const stats = diffStats(buildLineDiff(target.before, target.after));
+      total.additions += stats.additions;
+      total.deletions += stats.deletions;
+      return total;
+    },
+    { additions: 0, deletions: 0 },
+  );
+}
+
+function DiffModeToggle({ value, onChange }: { value: DiffViewMode; onChange: (value: DiffViewMode) => void }) {
+  return (
+    <div className="diff-mode-toggle">
+      <button type="button" className={value === "unified" ? "active" : ""} onClick={() => onChange("unified")}>Unified</button>
+      <button type="button" className={value === "split" ? "active" : ""} onClick={() => onChange("split")}>Split</button>
+    </div>
+  );
+}
+
+function UnifiedDiffView({ lines }: { lines: DiffLine[] }) {
+  return (
+    <pre className="history-diff-pre">
+      {lines.map((line, index) => {
+        const sign = line.type === "added" ? "+" : line.type === "removed" ? "-" : " ";
+        return (
+          <div key={index} className={`history-diff-line ${line.type}`}>
+            <span className="history-diff-num">{line.oldLineNum ?? ""}</span>
+            <span className="history-diff-num">{line.newLineNum ?? ""}</span>
+            <span className="history-diff-sign">{sign}</span>
+            <span className="history-diff-text">{line.content || " "}</span>
+          </div>
+        );
+      })}
+    </pre>
+  );
+}
+
+function SplitDiffView({ lines }: { lines: DiffLine[] }) {
+  const rows = splitDiffRows(lines);
+  return (
+    <pre className="history-diff-pre split">
+      {rows.map((row, index) => (
+        <div key={index} className="history-diff-split-row">
+          <div className={`history-diff-split-cell ${row.left?.type ?? "empty"}`}>
+            {row.left ? (
+              <>
+                <span className="history-diff-num">{row.left.oldLineNum ?? ""}</span>
+                <span className="history-diff-sign">{row.left.type === "removed" ? "-" : " "}</span>
+                <span className="history-diff-text">{row.left.content || " "}</span>
+              </>
+            ) : <span className="history-diff-text"> </span>}
+          </div>
+          <div className={`history-diff-split-cell ${row.right?.type ?? "empty"}`}>
+            {row.right ? (
+              <>
+                <span className="history-diff-num">{row.right.newLineNum ?? ""}</span>
+                <span className="history-diff-sign">{row.right.type === "added" ? "+" : " "}</span>
+                <span className="history-diff-text">{row.right.content || " "}</span>
+              </>
+            ) : <span className="history-diff-text"> </span>}
+          </div>
+        </div>
+      ))}
+    </pre>
+  );
+}
+
+function HistoryDiffPanel({
+  checkpoint,
+  previous,
+  viewMode,
+  onViewModeChange,
+}: {
+  checkpoint?: HistoryCheckpoint;
+  previous?: HistoryCheckpoint;
+  viewMode: DiffViewMode;
+  onViewModeChange: (value: DiffViewMode) => void;
+}) {
+  if (!checkpoint) {
+    return <div className="history-diff-empty">Select a checkpoint.</div>;
+  }
+  if (!previous) {
+    return <div className="history-diff-empty">No previous checkpoint.</div>;
+  }
+
+  const target = checkpointDiffTargets(previous, checkpoint)[0];
+  if (!target) {
+    return (
+      <section className="history-diff-panel">
+        <header className="history-diff-header">
+          <div>
+            <strong>Diff</strong>
+            <span>No text content changes</span>
+          </div>
+          <DiffModeToggle value={viewMode} onChange={onViewModeChange} />
+        </header>
+        <div className="history-diff-empty">No document diff.</div>
+      </section>
+    );
+  }
+
+  const lines = buildLineDiff(target.before, target.after);
+  const stats = diffStats(lines);
+  const hasDiff = stats.additions > 0 || stats.deletions > 0;
+
+  return (
+    <section className="history-diff-panel">
+      <header className="history-diff-header">
+        <div>
+          <strong>Diff</strong>
+          <span>
+            {target.label}{" "}
+            <span className="history-added">+{stats.additions}</span>
+            {" / "}
+            <span className="history-removed">-{stats.deletions}</span>
+          </span>
+        </div>
+        <DiffModeToggle value={viewMode} onChange={onViewModeChange} />
+      </header>
+      {!hasDiff ? (
+        <div className="history-diff-empty">No document diff.</div>
+      ) : viewMode === "split" ? (
+        <SplitDiffView lines={lines} />
+      ) : (
+        <UnifiedDiffView lines={lines} />
+      )}
+    </section>
+  );
 }
 
 export default function App() {
@@ -173,7 +448,15 @@ export default function App() {
   const [openFilePickerRequest, setOpenFilePickerRequest] = useState(0);
   const [checkpoints, setCheckpoints] = useState<HistoryCheckpoint[]>([]);
   const [isDark, setIsDark] = useState(() => window.matchMedia("(prefers-color-scheme: dark)").matches);
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [selectedHistoryId, setSelectedHistoryId] = useState<string | null>(null);
+  const [historyDiffViewMode, setHistoryDiffViewMode] = useState<DiffViewMode>("split");
+  const [externalEditorPath, setExternalEditorPath] = useState(() => readStored(EXTERNAL_EDITOR_KEY, ""));
+  const visibleCheckpoints = uniqueCheckpoints(checkpoints);
+  const selectedHistoryCheckpoint = visibleCheckpoints.find((item) => item.id === selectedHistoryId) ?? visibleCheckpoints.at(-1);
+  const selectedHistoryPrevious = selectedHistoryCheckpoint
+    ? visibleCheckpoints[visibleCheckpoints.findIndex((item) => item.id === selectedHistoryCheckpoint.id) - 1]
+    : undefined;
   const activeLayoutDirectionRef = useRef<EqualizeLayoutDirection>("horizontal");
   const lastCheckpointHashRef = useRef<string>("");
   const latestStateRef = useRef({ fileName, content, dashboard });
@@ -183,13 +466,28 @@ export default function App() {
   }, [isDark]);
 
   useEffect(() => {
+    if (!historyOpen) return;
+    if (!selectedHistoryId || !visibleCheckpoints.some((item) => item.id === selectedHistoryId)) {
+      setSelectedHistoryId(visibleCheckpoints.at(-1)?.id ?? null);
+    }
+  }, [historyOpen, selectedHistoryId, visibleCheckpoints]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(EXTERNAL_EDITOR_KEY, externalEditorPath);
+    } catch (error) {
+      console.warn("Could not persist external editor path.", error);
+    }
+  }, [externalEditorPath]);
+
+  useEffect(() => {
     latestStateRef.current = { fileName, content, dashboard };
   }, [fileName, content, dashboard]);
 
-  const addCheckpoint = useCallback((reason: CheckpointReason, force = false) => {
+  const addCheckpoint = useCallback((reason: CheckpointReason) => {
     const latest = latestStateRef.current;
     const hash = checkpointHash(latest.fileName, latest.content, latest.dashboard);
-    if (reason !== "initial" && hash === lastCheckpointHashRef.current) return false;
+    if (hash === lastCheckpointHashRef.current) return false;
 
     lastCheckpointHashRef.current = hash;
     const checkpoint: HistoryCheckpoint = {
@@ -201,12 +499,16 @@ export default function App() {
       dashboard: persistenceDashboard(latest.dashboard),
     };
 
-    setCheckpoints((items) => [...items.slice(-99), checkpoint]);
+    setCheckpoints((items) => {
+      const previous = items.at(-1);
+      if (previous && checkpointHash(previous.fileName, previous.content, previous.dashboard) === hash) return items;
+      return [...items.slice(-99), checkpoint];
+    });
     return true;
   }, []);
 
   useEffect(() => {
-    addCheckpoint("initial", true);
+    addCheckpoint("initial");
   }, [addCheckpoint]);
 
   useEffect(() => {
@@ -249,36 +551,9 @@ export default function App() {
     setMarkdownMode("wysiwyg");
   }, [content]);
 
-  const openDocument = useCallback((file: File) => {
-    const lowerName = file.name.toLowerCase();
-    if (isEpubFileName(lowerName)) {
-      epubToHtml(file).then((html) => {
-        setContent(html);
-        setFileName(file.name || "document.epub");
-        setMarkdownMode("preview");
-      }).catch((error) => {
-        console.error(error);
-        alert("Could not open this EPUB file.");
-      });
-      return;
-    }
-
-    const reader = new FileReader();
-    reader.addEventListener("load", () => {
-      setContent(String(reader.result ?? ""));
-      setFileName(file.name || "document.md");
-      setMarkdownMode(lowerName.endsWith(".md") || lowerName.endsWith(".markdown") ? "wysiwyg" : "preview");
-    });
-    if (lowerName.endsWith(".pdf")) {
-      reader.readAsDataURL(file);
-    } else {
-      reader.readAsText(file);
-    }
-  }, []);
-
   const saveDocument = useCallback(() => {
     persistLocalState(fileName, content, dashboard);
-    addCheckpoint("manual", true);
+    addCheckpoint("manual");
     setSavedAt(new Date());
   }, [content, fileName, dashboard, addCheckpoint]);
 
@@ -299,8 +574,16 @@ export default function App() {
     setContent(checkpoint.content);
     setDashboard(structuredClone(checkpoint.dashboard));
     setHistoryOpen(false);
-    window.setTimeout(() => addCheckpoint("restore", true), 0);
+    window.setTimeout(() => addCheckpoint("restore"), 0);
   }, [addCheckpoint, content, dashboard, fileName]);
+
+  const requestHistoryCheckpoint = useCallback((reason: CheckpointReason) => {
+    addCheckpoint(reason);
+  }, [addCheckpoint]);
+
+  const requestDeferredHistoryCheckpoint = useCallback((reason: CheckpointReason) => {
+    window.setTimeout(() => addCheckpoint(reason), 0);
+  }, [addCheckpoint]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -313,10 +596,6 @@ export default function App() {
       if (event.key.toLowerCase() === "e") {
         event.preventDefault();
         exportDocument();
-      }
-      if (event.key.toLowerCase() === "o") {
-        event.preventDefault();
-        setOpenFilePickerRequest((value) => value + 1);
       }
       if (event.key.toLowerCase() === "n") {
         event.preventDefault();
@@ -392,20 +671,11 @@ export default function App() {
           <button type="button" className="icon-button" onClick={() => setIsDark((value) => !value)} title="Toggle theme">
             {isDark ? <Sun size={18} /> : <Moon size={18} />}
           </button>
+          <button type="button" className="icon-button" onClick={() => setSettingsOpen(true)} title="Settings">
+            <Settings size={18} />
+          </button>
         </div>
       </header>
-
-      <input
-        ref={fileInputRef}
-        type="file"
-        accept=".md,.markdown,.html,.htm,.epub,.pdf,.txt,text/markdown,text/html,application/epub+zip,text/plain,application/pdf,*/*"
-        className="hidden-input"
-        onChange={(event) => {
-          const file = event.currentTarget.files?.[0];
-          if (file) openDocument(file);
-          event.currentTarget.value = "";
-        }}
-      />
 
       <section className="editor-frame">
         <DashboardView
@@ -418,7 +688,6 @@ export default function App() {
           fileName={fileName}
           onFileNameChange={setFileName}
           onNewDocument={newDocument}
-          onOpenDocument={() => fileInputRef.current?.click()}
           onSaveDocument={saveDocument}
           onExportDocument={exportDocument}
           onHistoryClick={() => setHistoryOpen(true)}
@@ -428,8 +697,46 @@ export default function App() {
           equalizeLayoutRequest={equalizeLayoutRequest}
           splitWidgetRequest={splitWidgetRequest}
           openFilePickerRequest={openFilePickerRequest}
+          externalEditorPath={externalEditorPath}
+          onHistoryCheckpoint={requestHistoryCheckpoint}
+          onDeferredHistoryCheckpoint={requestDeferredHistoryCheckpoint}
         />
       </section>
+
+      {settingsOpen && (
+        <div className="settings-backdrop" onClick={() => setSettingsOpen(false)}>
+          <section className="settings-modal" onClick={(event) => event.stopPropagation()}>
+            <header className="settings-header">
+              <strong>Settings</strong>
+              <button type="button" className="icon-button" onClick={() => setSettingsOpen(false)} title="Close">
+                <X size={18} />
+              </button>
+            </header>
+            <div className="settings-body">
+              <label className="settings-field">
+                <span>External editor path</span>
+                <div className="settings-path-row">
+                  <input
+                    value={externalEditorPath}
+                    onChange={(event) => setExternalEditorPath(event.target.value)}
+                    placeholder="C:\\Program Files\\Microsoft VS Code\\Code.exe"
+                  />
+                  <button
+                    type="button"
+                    className="settings-browse"
+                    onClick={async () => {
+                      const path = await selectExternalEditor();
+                      if (path) setExternalEditorPath(path);
+                    }}
+                  >
+                    Browse
+                  </button>
+                </div>
+              </label>
+            </div>
+          </section>
+        </div>
+      )}
 
       {historyOpen && (
         <div className="history-backdrop" onClick={() => setHistoryOpen(false)}>
@@ -437,38 +744,54 @@ export default function App() {
             <header className="history-header">
               <div>
                 <strong>History</strong>
-                <span>{checkpoints.length} checkpoints in this session</span>
+                <span>{visibleCheckpoints.length} checkpoints in this session</span>
               </div>
               <button type="button" className="icon-button" onClick={() => setHistoryOpen(false)} title="Close">
                 <X size={18} />
               </button>
             </header>
 
-            <div className="history-list">
-              {[...checkpoints].reverse().map((checkpoint, index) => {
-                const previous = checkpoints[checkpoints.findIndex((item) => item.id === checkpoint.id) - 1];
-                const isCurrent = index === 0 && checkpointHash(fileName, content, dashboard) === checkpointHash(checkpoint.fileName, checkpoint.content, checkpoint.dashboard);
-                return (
-                  <article key={checkpoint.id} className="history-item">
-                    <div className="history-item-main">
-                      <strong>{reasonLabel(checkpoint.reason)}</strong>
-                      <span>{checkpoint.timestamp.toLocaleString()}</span>
-                      <small>{changedSummary(checkpoint, previous)}</small>
-                    </div>
-                    <button
-                      type="button"
-                      className="history-restore"
-                      onClick={() => restoreCheckpoint(checkpoint)}
-                      disabled={isCurrent}
-                      title={isCurrent ? "Current state" : "Restore this checkpoint"}
-                    >
-                      {isCurrent ? <Check size={16} /> : null}
-                      <span>{isCurrent ? "Current" : "Restore"}</span>
-                    </button>
-                  </article>
-                );
-              })}
-              {checkpoints.length === 0 && <div className="history-empty">No checkpoints yet.</div>}
+            <div className="history-body">
+              <div className="history-list">
+                {[...visibleCheckpoints].reverse().map((checkpoint, index) => {
+                  const previous = visibleCheckpoints[visibleCheckpoints.findIndex((item) => item.id === checkpoint.id) - 1];
+                  const isCurrent = index === 0 && checkpointHash(fileName, content, dashboard) === checkpointHash(checkpoint.fileName, checkpoint.content, checkpoint.dashboard);
+                  const isSelected = selectedHistoryCheckpoint?.id === checkpoint.id;
+                  const stats = checkpointDiffStats(previous, checkpoint);
+                  return (
+                    <article key={checkpoint.id} className={`history-item ${isSelected ? "selected" : ""}`} onClick={() => setSelectedHistoryId(checkpoint.id)}>
+                      <div className="history-item-main">
+                        <strong>{reasonLabel(checkpoint.reason)}</strong>
+                        <span>{checkpoint.timestamp.toLocaleString()}</span>
+                        <small>
+                          {changedSummary(checkpoint, previous)}
+                          {previous ? `  +${stats.additions} / -${stats.deletions}` : ""}
+                        </small>
+                      </div>
+                      <button
+                        type="button"
+                        className="history-restore"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          restoreCheckpoint(checkpoint);
+                        }}
+                        disabled={isCurrent}
+                        title={isCurrent ? "Current state" : "Restore this checkpoint"}
+                      >
+                        {isCurrent ? <Check size={16} /> : null}
+                        <span>{isCurrent ? "Current" : "Restore"}</span>
+                      </button>
+                    </article>
+                  );
+                })}
+                {visibleCheckpoints.length === 0 && <div className="history-empty">No checkpoints yet.</div>}
+              </div>
+              <HistoryDiffPanel
+                checkpoint={selectedHistoryCheckpoint}
+                previous={selectedHistoryPrevious}
+                viewMode={historyDiffViewMode}
+                onViewModeChange={setHistoryDiffViewMode}
+              />
             </div>
           </section>
         </div>

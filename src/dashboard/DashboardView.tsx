@@ -13,16 +13,19 @@ import {
   Minimize2,
   MoreHorizontal,
   PenLine,
+  RefreshCw,
   Save,
   Search,
+  SquarePen,
   ZoomIn,
   ZoomOut,
-  Trash2,
+  X,
   type LucideIcon,
 } from "lucide-react";
 import { MarkdownPreview } from "../components/MarkdownPreview";
 import { WysiwygEditor } from "../components/WysiwygEditor";
 import { epubToHtml, isEpubFileName } from "../lib/epub";
+import { hasWailsBackend, onWailsFileDrop, openExternalEditor, readLocalFile, selectLocalFilePath } from "../lib/wailsBackend";
 import type { EqualizeLayoutDirection, MarkdownMode } from "../App";
 import type { DashboardData, DashboardWidget, LayoutPos } from "./types";
 
@@ -48,6 +51,7 @@ const widgetDefs = [
 interface RecentFile {
   id: string;
   fileName: string;
+  filePath?: string;
   content: string;
   mode: MarkdownMode;
   updatedAt: Date;
@@ -74,6 +78,13 @@ function dataUrlToBlob(dataUrl: string): Blob | null {
   return new Blob([bytes], { type: mimeType });
 }
 
+async function prepareOpenedContent(fileName: string, content: string): Promise<string> {
+  if (!isEpubFileName(fileName)) return content;
+  const blob = dataUrlToBlob(content);
+  if (!blob) throw new Error("EPUB content was not returned as binary data.");
+  return await epubToHtml(new File([blob], fileName || "document.epub", { type: "application/epub+zip" }));
+}
+
 function downloadFile(fileName: string, content: string) {
   const dataBlob = content.startsWith("data:") ? dataUrlToBlob(content) : null;
   const blob = dataBlob ?? new Blob([content], { type: "text/plain;charset=utf-8" });
@@ -86,12 +97,23 @@ function downloadFile(fileName: string, content: string) {
 }
 
 function readFileMode(fileName: string): MarkdownMode {
-  const lowerName = fileName.toLowerCase();
-  return lowerName.endsWith(".md") || lowerName.endsWith(".markdown") ? "wysiwyg" : "preview";
+  return "preview";
+}
+
+function isEditMode(mode: unknown): mode is "wysiwyg" | "raw" {
+  return mode === "wysiwyg" || mode === "raw";
 }
 
 function isImageFileName(fileName: string) {
   return /\.(avif|bmp|gif|jpe?g|png|svg|webp)$/i.test(fileName);
+}
+
+function isBinaryPreviewFileName(fileName: string): boolean {
+  return /\.(avif|bmp|gif|jpe?g|pdf|png|svg|webp)$/i.test(fileName);
+}
+
+function recentContent(fileName: string, content: string, filePath?: string): string {
+  return filePath && isBinaryPreviewFileName(fileName) && content.startsWith("data:") ? "" : content;
 }
 
 function readViewFontScale(config: Record<string, unknown>): number {
@@ -239,7 +261,12 @@ function PdfDocumentFrame({ content, title }: { content: string; title: string }
       return;
     }
 
-    const blob = content.startsWith("data:") ? dataUrlToBlob(content) : new Blob([content], { type: "application/pdf" });
+    if (content.startsWith("data:")) {
+      setUrl(content);
+      return;
+    }
+
+    const blob = new Blob([content], { type: "application/pdf" });
     if (!blob) {
       setUrl("");
       return;
@@ -348,25 +375,6 @@ function WidgetBody({
   return null;
 }
 
-function readPickedFile(file: File, onLoad: (fileName: string, content: string, mode: MarkdownMode) => void) {
-  if (isEpubFileName(file.name)) {
-    epubToHtml(file).then((html) => {
-      onLoad(file.name || "document.epub", html, "preview");
-    }).catch((error) => {
-      console.error(error);
-      alert("Could not open this EPUB file.");
-    });
-    return;
-  }
-
-  const reader = new FileReader();
-  reader.addEventListener("load", () => {
-    onLoad(file.name || "document.txt", String(reader.result ?? ""), readFileMode(file.name));
-  });
-  if (file.name.toLowerCase().endsWith(".pdf") || isImageFileName(file.name)) reader.readAsDataURL(file);
-  else reader.readAsText(file);
-}
-
 function FilePickerDialog({
   query,
   recentFiles,
@@ -390,6 +398,14 @@ function FilePickerDialog({
     inputRef.current?.focus();
   }, []);
 
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [onClose]);
+
   return (
     <div className="file-picker-backdrop" onClick={onClose}>
       <section className="file-picker" onClick={(event) => event.stopPropagation()}>
@@ -411,6 +427,9 @@ function FilePickerDialog({
           <button type="button" className="file-picker-browse" onClick={onBrowse}>
             <FolderOpen size={16} />
             <span>Browse</span>
+          </button>
+          <button type="button" className="file-picker-close" onClick={onClose} title="Close">
+            <X size={17} />
           </button>
         </header>
 
@@ -455,7 +474,6 @@ export function DashboardView({
   fileName,
   onFileNameChange,
   onNewDocument,
-  onOpenDocument,
   onSaveDocument,
   onExportDocument,
   onHistoryClick,
@@ -465,6 +483,9 @@ export function DashboardView({
   equalizeLayoutRequest,
   splitWidgetRequest,
   openFilePickerRequest,
+  externalEditorPath,
+  onHistoryCheckpoint,
+  onDeferredHistoryCheckpoint,
 }: {
   data: DashboardData;
   onChange: (data: DashboardData) => void;
@@ -475,7 +496,6 @@ export function DashboardView({
   fileName: string;
   onFileNameChange: (value: string) => void;
   onNewDocument: () => void;
-  onOpenDocument: () => void;
   onSaveDocument: () => void;
   onExportDocument: () => void;
   onHistoryClick: () => void;
@@ -485,16 +505,19 @@ export function DashboardView({
   equalizeLayoutRequest: { id: number; direction: EqualizeLayoutDirection };
   splitWidgetRequest: { id: number; direction: EqualizeLayoutDirection };
   openFilePickerRequest: number;
+  externalEditorPath: string;
+  onHistoryCheckpoint: (reason: "reload") => void;
+  onDeferredHistoryCheckpoint: (reason: "reload") => void;
 }) {
   const [moreOpenId, setMoreOpenId] = useState<string | null>(null);
   const [maximizedWidgetId, setMaximizedWidgetId] = useState<string | null>(null);
   const [activeWidgetId, setActiveWidgetId] = useState<string | null>(null);
   const gridRef = useRef<HTMLDivElement | null>(null);
-  const pickerInputRef = useRef<HTMLInputElement | null>(null);
   const seededRecentFilesRef = useRef(false);
   const handledAddWidgetRequestRef = useRef(0);
   const handledEqualizeLayoutRequestRef = useRef(0);
   const handledSplitWidgetRequestRef = useRef(0);
+  const hydratedFilePathsRef = useRef(new Set<string>());
   const [recentFiles, setRecentFiles] = useState<RecentFile[]>([]);
   const [filePickerTargetId, setFilePickerTargetId] = useState<string | null>(null);
   const [filePickerCreatesWidget, setFilePickerCreatesWidget] = useState(false);
@@ -520,11 +543,12 @@ export function DashboardView({
     [data.widgets, onChange],
   );
 
-  const recordRecentFile = useCallback((fileName: string, content: string, mode: MarkdownMode) => {
+  const recordRecentFile = useCallback((fileName: string, content: string, mode: MarkdownMode, filePath?: string) => {
     if (!fileName.trim()) return;
+    const storedContent = recentContent(fileName, content, filePath);
     setRecentFiles((items) => [
-      { id: `${fileName}-${Date.now()}`, fileName, content, mode, updatedAt: new Date() },
-      ...items.filter((item) => item.fileName !== fileName).slice(0, 29),
+      { id: `${filePath || fileName}-${Date.now()}`, fileName, filePath, content: storedContent, mode, updatedAt: new Date() },
+      ...items.filter((item) => (filePath ? item.filePath !== filePath : item.fileName !== fileName)).slice(0, 29),
     ]);
   }, []);
 
@@ -534,11 +558,12 @@ export function DashboardView({
     data.widgets.forEach((widget) => {
       if (widget.type !== "file") return;
       const widgetFileName = typeof widget.config.fileName === "string" ? widget.config.fileName : "";
+      const widgetFilePath = typeof widget.config.filePath === "string" ? widget.config.filePath : undefined;
       const widgetContent = typeof widget.config.content === "string" ? widget.config.content : "";
       const widgetMode = widget.config.mode === "preview" || widget.config.mode === "wysiwyg" || widget.config.mode === "raw"
         ? widget.config.mode
         : readFileMode(widgetFileName);
-      if (widgetFileName && widgetContent) recordRecentFile(widgetFileName, widgetContent, widgetMode);
+      if (widgetFileName && widgetContent) recordRecentFile(widgetFileName, widgetContent, widgetMode, widgetFilePath);
     });
   }, [data.widgets, recordRecentFile]);
 
@@ -550,9 +575,10 @@ export function DashboardView({
       updateWidget({ ...widget, config: nextConfig });
 
       const nextFileName = typeof nextConfig.fileName === "string" ? nextConfig.fileName : "";
+      const nextFilePath = typeof nextConfig.filePath === "string" ? nextConfig.filePath : undefined;
       const nextContent = typeof nextConfig.content === "string" ? nextConfig.content : "";
       const nextMode = nextConfig.mode === "preview" || nextConfig.mode === "wysiwyg" || nextConfig.mode === "raw" ? nextConfig.mode : readFileMode(nextFileName);
-      if (nextFileName && nextContent) recordRecentFile(nextFileName, nextContent, nextMode);
+      if (nextFileName && nextContent) recordRecentFile(nextFileName, nextContent, nextMode, nextFilePath);
     },
     [data.widgets, recordRecentFile, updateWidget],
   );
@@ -811,27 +837,130 @@ export function DashboardView({
     return nextWidgets;
   }, [fitGridRows]);
 
+  const createFileWidget = useCallback(
+    (fileName: string, content: string, mode: MarkdownMode, direction: EqualizeLayoutDirection, filePath?: string) => {
+      if (data.widgets.length >= MAX_WIDGETS) return;
+      const nextWidget = {
+        ...widgetDefaults("file", data.widgets, direction),
+        config: { fileName, filePath, content, mode },
+      };
+      onChange({ widgets: buildAddedWidgets(data.widgets, nextWidget, direction) });
+      recordRecentFile(fileName, content, mode, filePath);
+      setActiveWidgetId(nextWidget.id);
+    },
+    [buildAddedWidgets, data.widgets, onChange, recordRecentFile],
+  );
+
+  const openFileInWidget = useCallback(
+    (widgetId: string, fileName: string, content: string, mode: MarkdownMode, filePath?: string) => {
+      const targetWidget = data.widgets.find((widget) => widget.id === widgetId);
+      const nextMode = isEditMode(targetWidget?.config.mode) ? targetWidget.config.mode : mode;
+      updateFileWidget(widgetId, { fileName, filePath, content, mode: nextMode });
+      setActiveWidgetId(widgetId);
+    },
+    [data.widgets, updateFileWidget],
+  );
+
+  useEffect(() => {
+    if (!hasWailsBackend()) return;
+    data.widgets.forEach((widget) => {
+      if (widget.type !== "file") return;
+      const fileName = typeof widget.config.fileName === "string" ? widget.config.fileName : "";
+      const filePath = typeof widget.config.filePath === "string" ? widget.config.filePath : "";
+      const content = typeof widget.config.content === "string" ? widget.config.content : "";
+      if (!fileName || !filePath || content) return;
+
+      const hydrateKey = `${widget.id}:${filePath}`;
+      if (hydratedFilePathsRef.current.has(hydrateKey)) return;
+      hydratedFilePathsRef.current.add(hydrateKey);
+
+      void (async () => {
+        try {
+          const result = await readLocalFile(filePath);
+          if (!result) return;
+          const nextContent = await prepareOpenedContent(result.fileName, result.content);
+          openFileInWidget(widget.id, result.fileName, nextContent, readFileMode(result.fileName), result.path);
+        } catch (error) {
+          console.warn("Could not restore local file content.", error);
+        }
+      })();
+    });
+  }, [data.widgets, openFileInWidget]);
+
   const applyPickedFile = useCallback(
-    (fileName: string, content: string, mode: MarkdownMode) => {
+    (fileName: string, content: string, mode: MarkdownMode, filePath?: string) => {
       if (filePickerCreatesWidget) {
-        const createDirection = filePickerCreateDirection;
-        const nextWidget = {
-          ...widgetDefaults("file", data.widgets, createDirection),
-          config: { fileName, content, mode },
-        };
-        onChange({ widgets: buildAddedWidgets(data.widgets, nextWidget, createDirection) });
-        recordRecentFile(fileName, content, mode);
-        setActiveWidgetId(nextWidget.id);
+        createFileWidget(fileName, content, mode, filePickerCreateDirection, filePath);
       } else if (filePickerTargetId) {
-        updateFileWidget(filePickerTargetId, { fileName, content, mode });
+        openFileInWidget(filePickerTargetId, fileName, content, mode, filePath);
       }
       setFilePickerTargetId(null);
       setFilePickerCreatesWidget(false);
       setFilePickerCreateDirection(activeLayoutDirection);
       setFilePickerQuery("");
     },
-    [activeLayoutDirection, buildAddedWidgets, data.widgets, filePickerCreateDirection, filePickerCreatesWidget, filePickerTargetId, onChange, recordRecentFile, updateFileWidget],
+    [activeLayoutDirection, createFileWidget, filePickerCreateDirection, filePickerCreatesWidget, filePickerTargetId, openFileInWidget],
   );
+
+  const openPathAsWidget = useCallback(
+    async (path: string) => {
+      const result = await readLocalFile(path);
+      if (!result) return;
+      const content = await prepareOpenedContent(result.fileName, result.content);
+      createFileWidget(result.fileName, content, readFileMode(result.fileName), activeLayoutDirection, result.path);
+    },
+    [activeLayoutDirection, createFileWidget],
+  );
+
+  const openPathInWidget = useCallback(
+    async (widgetId: string, path: string) => {
+      const result = await readLocalFile(path);
+      if (!result) return;
+      const content = await prepareOpenedContent(result.fileName, result.content);
+      openFileInWidget(widgetId, result.fileName, content, readFileMode(result.fileName), result.path);
+    },
+    [openFileInWidget],
+  );
+
+  const browseLocalFile = useCallback(async () => {
+    if (hasWailsBackend()) {
+      try {
+        const path = await selectLocalFilePath();
+        if (!path) return;
+        setFilePickerTargetId(null);
+        setFilePickerCreatesWidget(false);
+        setFilePickerCreateDirection(activeLayoutDirection);
+        setFilePickerQuery("");
+
+        const result = await readLocalFile(path);
+        if (result) {
+          const content = await prepareOpenedContent(result.fileName, result.content);
+          applyPickedFile(result.fileName, content, readFileMode(result.fileName), result.path);
+        }
+      } catch (error) {
+        console.error(error);
+        alert("Could not open this file.");
+      }
+      return;
+    }
+    alert("Local file access is available in the Wails desktop app.");
+  }, [activeLayoutDirection, applyPickedFile]);
+
+  useEffect(() => {
+    if (!hasWailsBackend()) return;
+    const dispose = onWailsFileDrop((x, y, paths) => {
+      const path = paths[0];
+      if (!path) return;
+      const target = document.elementFromPoint(x, y)?.closest<HTMLElement>("[data-widget-id]");
+      const widgetId = target?.dataset.widgetId;
+      if (widgetId) {
+        void openPathInWidget(widgetId, path);
+      } else {
+        void openPathAsWidget(path);
+      }
+    });
+    return () => dispose?.();
+  }, [openPathAsWidget, openPathInWidget]);
 
   const addWidget = (type: DashboardWidget["type"], direction: EqualizeLayoutDirection) => {
     if (data.widgets.length >= MAX_WIDGETS) return;
@@ -885,22 +1014,25 @@ export function DashboardView({
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       const meta = event.metaKey || event.ctrlKey;
-      if (!meta || event.key.toLowerCase() !== "p") return;
-      event.preventDefault();
-      openFilePicker();
+      if (!meta) return;
+      const key = event.key.toLowerCase();
+      if (key === "p") {
+        event.preventDefault();
+        openFilePicker();
+      }
+      if (key === "o") {
+        event.preventDefault();
+        const nextWidgetId = activeWidgetId ?? data.widgets[0]?.id ?? null;
+        if (nextWidgetId) setMaximizedWidgetId(nextWidgetId);
+      }
+      if (key === "m") {
+        event.preventDefault();
+        setMaximizedWidgetId(null);
+      }
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [openFilePicker]);
-
-  useEffect(() => {
-    if (!maximizedWidgetId) return;
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setMaximizedWidgetId(null);
-    };
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [maximizedWidgetId]);
+  }, [activeWidgetId, data.widgets, openFilePicker]);
 
   const markdownModes: Array<{ key: MarkdownMode; label: string; icon: LucideIcon }> = [
     { key: "preview", label: "Preview", icon: Eye },
@@ -918,17 +1050,6 @@ export function DashboardView({
 
   return (
     <section className="dashboard-shell">
-      <input
-        ref={pickerInputRef}
-        type="file"
-        className="hidden-input"
-        accept=".md,.markdown,.html,.htm,.epub,.pdf,.txt,.png,.jpg,.jpeg,.gif,.webp,.avif,.bmp,.svg,text/markdown,text/html,application/epub+zip,text/plain,application/pdf,image/*,*/*"
-        onChange={(event) => {
-          const file = event.currentTarget.files?.[0];
-          if (file) readPickedFile(file, applyPickedFile);
-          event.currentTarget.value = "";
-        }}
-      />
       <div className="dashboard-scroll">
         <div
           ref={gridRef}
@@ -943,6 +1064,7 @@ export function DashboardView({
           {data.widgets.map((widget) => (
             (() => {
               const widgetFileName = typeof widget.config.fileName === "string" ? widget.config.fileName : fileName;
+              const widgetFilePath = typeof widget.config.filePath === "string" ? widget.config.filePath : "";
               const widgetContent = typeof widget.config.content === "string" ? widget.config.content : documentMarkdown;
               const widgetMode = widget.config.mode === "preview" || widget.config.mode === "wysiwyg" || widget.config.mode === "raw"
                 ? widget.config.mode
@@ -956,7 +1078,7 @@ export function DashboardView({
               const isMaximized = maximizedWidgetId === widget.id;
               const handleAction = (id: string) => {
                 if (id === "new") {
-                  updateFileConfig({ fileName: "untitled.md", content: "# Untitled\n\n", mode: "wysiwyg" });
+                  updateFileConfig({ fileName: "untitled.md", filePath: undefined, content: "# Untitled\n\n", mode: "wysiwyg" });
                 } else if (id === "open") {
                   openFilePicker(widget.id);
                 } else if (id === "save") {
@@ -965,6 +1087,29 @@ export function DashboardView({
                   downloadFile(widgetFileName, widgetContent);
                 } else if (id === "history") {
                   onHistoryClick();
+                }
+              };
+              const openInExternalEditor = async () => {
+                if (!externalEditorPath || !widgetFilePath) return;
+                try {
+                  await openExternalEditor(externalEditorPath, widgetFilePath);
+                } catch (error) {
+                  console.error(error);
+                  alert("Could not open the external editor.");
+                }
+              };
+              const reloadFromDisk = async () => {
+                if (!widgetFilePath) return;
+                try {
+                  onHistoryCheckpoint("reload");
+                  const result = await readLocalFile(widgetFilePath);
+                  if (!result) return;
+                  const content = await prepareOpenedContent(result.fileName, result.content);
+                  openFileInWidget(widget.id, result.fileName, content, readFileMode(result.fileName), result.path);
+                  onDeferredHistoryCheckpoint("reload");
+                } catch (error) {
+                  console.error(error);
+                  alert("Could not reload this file.");
                 }
               };
               const beginMove = (event: ReactPointerEvent<HTMLButtonElement>) => {
@@ -988,6 +1133,7 @@ export function DashboardView({
               return (
             <article
               key={widget.id}
+              data-widget-id={widget.id}
               className={`dashboard-widget ${activeWidgetId === widget.id ? "active" : ""} ${isMaximized ? "maximized" : ""} ${dragging?.id === widget.id ? "interacting" : ""}`}
               style={{
                 gridColumn: isMaximized ? undefined : `${widget.layout.x + 1} / span ${widget.layout.w}`,
@@ -1011,12 +1157,7 @@ export function DashboardView({
               >
                 {widget.type === "file" ? (
                   <div className="markdown-widget-header-main">
-                    <input
-                      value={widgetFileName}
-                      onChange={(event) => updateFileConfig({ fileName: event.target.value })}
-                      className="widget-filename-input"
-                      aria-label="File name"
-                    />
+                    <span className="widget-filename-label" title={widgetFileName}>{widgetFileName}</span>
                   </div>
                 ) : (
                   <strong>{widget.title}</strong>
@@ -1069,7 +1210,7 @@ export function DashboardView({
                           title="Narrow content"
                           disabled={viewWidthScale <= MIN_VIEW_WIDTH_SCALE}
                         >
-                          <Minimize2 size={15} />
+                          <span className="widget-width-symbol" aria-hidden="true">→←</span>
                         </button>
                         <button
                           type="button"
@@ -1078,11 +1219,29 @@ export function DashboardView({
                           title="Widen content"
                           disabled={viewWidthScale >= MAX_VIEW_WIDTH_SCALE}
                         >
-                          <Maximize2 size={15} />
+                          <span className="widget-width-symbol" aria-hidden="true">←→</span>
                         </button>
                       </div>
                     )}
                     <div className="widget-action-group">
+                      <button
+                        type="button"
+                        className="widget-icon-button"
+                        onClick={openInExternalEditor}
+                        title={widgetFilePath ? "Open in external editor" : "Open a local file first"}
+                        disabled={!externalEditorPath || !widgetFilePath}
+                      >
+                        <SquarePen size={15} />
+                      </button>
+                      <button
+                        type="button"
+                        className="widget-icon-button"
+                        onClick={reloadFromDisk}
+                        title={widgetFilePath ? "Reload from disk" : "Open a local file first"}
+                        disabled={!widgetFilePath}
+                      >
+                        <RefreshCw size={15} />
+                      </button>
                       {markdownActions.map((item) => {
                         const Icon = item.icon;
                         return (
@@ -1105,6 +1264,66 @@ export function DashboardView({
                         <>
                           <button type="button" className="widget-more-scrim" onClick={() => setMoreOpenId(null)} aria-label="Close menu" />
                           <div className="widget-more-menu">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                void openInExternalEditor();
+                                setMoreOpenId(null);
+                              }}
+                              disabled={!externalEditorPath || !widgetFilePath}
+                            >
+                              <SquarePen size={15} />
+                              <span>External editor</span>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                void reloadFromDisk();
+                                setMoreOpenId(null);
+                              }}
+                              disabled={!widgetFilePath}
+                            >
+                              <RefreshCw size={15} />
+                              <span>Reload</span>
+                            </button>
+                            {canAdjustView && (
+                              <>
+                                <div className="widget-more-separator" />
+                                <button
+                                  type="button"
+                                  onClick={() => updateFileConfig({ viewFontScale: nextViewFontScale(viewFontScale, -1) })}
+                                  disabled={viewFontScale <= MIN_VIEW_FONT_SCALE}
+                                >
+                                  <ZoomOut size={15} />
+                                  <span>Smaller text</span>
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => updateFileConfig({ viewFontScale: nextViewFontScale(viewFontScale, 1) })}
+                                  disabled={viewFontScale >= MAX_VIEW_FONT_SCALE}
+                                >
+                                  <ZoomIn size={15} />
+                                  <span>Larger text</span>
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => updateFileConfig({ viewWidthScale: nextViewWidthScale(viewWidthScale, -1) })}
+                                  disabled={viewWidthScale <= MIN_VIEW_WIDTH_SCALE}
+                                >
+                                  <span className="widget-width-symbol" aria-hidden="true">→←</span>
+                                  <span>Narrow content</span>
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => updateFileConfig({ viewWidthScale: nextViewWidthScale(viewWidthScale, 1) })}
+                                  disabled={viewWidthScale >= MAX_VIEW_WIDTH_SCALE}
+                                >
+                                  <span className="widget-width-symbol" aria-hidden="true">←→</span>
+                                  <span>Widen content</span>
+                                </button>
+                              </>
+                            )}
+                            <div className="widget-more-separator" />
                             {fileIsMarkdown && markdownModes.map((item) => {
                               const Icon = item.icon;
                               return (
@@ -1166,7 +1385,7 @@ export function DashboardView({
                     }}
                     title="Delete"
                   >
-                    <Trash2 size={15} />
+                    <X size={15} />
                   </button>
                 </div>
               </header>
@@ -1216,8 +1435,21 @@ export function DashboardView({
           query={filePickerQuery}
           recentFiles={recentFiles}
           onQueryChange={setFilePickerQuery}
-          onBrowse={() => pickerInputRef.current?.click()}
-          onSelect={(file) => applyPickedFile(file.fileName, file.content, file.mode)}
+          onBrowse={browseLocalFile}
+          onSelect={async (file) => {
+            if (file.filePath) {
+              setFilePickerTargetId(null);
+              setFilePickerCreatesWidget(false);
+              setFilePickerCreateDirection(activeLayoutDirection);
+              setFilePickerQuery("");
+              const result = await readLocalFile(file.filePath);
+              if (!result) return;
+              const content = await prepareOpenedContent(result.fileName, result.content);
+              applyPickedFile(result.fileName, content, readFileMode(result.fileName), result.path);
+              return;
+            }
+            applyPickedFile(file.fileName, file.content, file.mode, file.filePath);
+          }}
           onClose={() => {
             setFilePickerTargetId(null);
             setFilePickerCreatesWidget(false);

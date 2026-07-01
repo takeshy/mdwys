@@ -1,101 +1,130 @@
 # mdwys
 
-mdwys is a local Markdown/file workspace built with Deno, Vite, and React. It provides movable dashboard widgets for editing and previewing Markdown, text, HTML, PDF, and image files.
+mdwys is a local desktop workspace for Markdown and document files. It lets you open files as movable widgets, arrange them in rows or columns, edit Markdown, preview documents, and reload changes made by an external editor.
 
-## English
+Built with Go, Wails, Deno, Vite, React, and Wysimark.
 
-### Features
+[日本語 README](README_ja.md)
 
+![Column layout](docs/images/col.png)
+
+## Features
+
+- Open local files as independent widgets.
+- Supported file types: Markdown, plain text, HTML, EPUB, PDF, and common image formats.
 - Markdown modes: Preview, WYSIWYG, and Raw.
-- File widgets can open Markdown, plain text, HTML, PDF, and common image formats.
-- Add Widget opens the file picker first; a widget is created only after a file is selected.
-- Widgets can be moved, resized, maximized, restored, deleted, and selected from the header.
-- Split controls support vertical and horizontal layout defaults, active-widget splitting, and full re-layout.
-- Layouts are capped at 9 widgets and are normalized to avoid very small 2/3-style leftover regions.
-- Current document and dashboard state are stored in `localStorage`.
+- Add, move, resize, maximize, restore, and close widgets.
+- Arrange widgets in row-oriented or column-oriented layouts.
+- Drag and drop a file onto empty space to create a new widget.
+- Drag and drop a file onto an existing widget to replace that widget's file.
+- Set an external editor and open the current widget file from the widget toolbar.
+- Reload a widget from disk after editing the file externally.
+- Keep session history with split and unified diffs.
+- Restore local-file widgets after restart when a file path is available.
+- Light and dark themes.
 
-### Requirements
+## Screenshots
 
-- Deno 2.9.0 or newer
+### Row Layout
 
-### Commands
+![Row layout](docs/images/row.png)
+
+### Column Layout
+
+![Column layout](docs/images/col.png)
+
+### External Editor
+
+![External editor setting](docs/images/external_editor.png)
+
+## Install
+
+Download a binary from the GitHub Releases page. The executable does not require Deno or Go at runtime.
+
+Release artifacts are built for:
+
+- `mdwys-linux-amd64`
+- `mdwys-linux-arm64`
+- `mdwys-darwin-amd64`
+- `mdwys-darwin-arm64`
+- `mdwys-windows-amd64.exe`
+- `mdwys-windows-arm64.exe`
+
+## Usage
+
+1. Start mdwys.
+2. Click `+ Add Widget`.
+3. Choose a local file.
+4. Use the widget toolbar to switch Markdown mode, reload from disk, open the file in an external editor, view history, maximize, or close the widget.
+5. Use the row/column buttons in the top toolbar to control how new widgets are arranged.
+
+For external editor integration, open Settings and set the editor executable path. On Windows, for example:
+
+```text
+C:\Program Files\Neovim\bin\nvim.exe
+```
+
+## Keyboard Shortcuts
+
+- `Ctrl/Cmd + O`: maximize the active widget.
+- `Ctrl/Cmd + M`: restore a maximized widget.
+- `Ctrl/Cmd + S`: save the current local state.
+- `Ctrl/Cmd + E`: export the current document content.
+- `Ctrl/Cmd + P`: open the widget file picker.
+- `Esc`: close a modal.
+
+## Development
+
+Development requires:
+
+- Deno 2.9 or newer
+- Go 1.23 or newer
+- Wails platform dependencies for your OS
+
+Install frontend dependencies:
 
 ```bash
 deno install --allow-scripts
-deno task dev
-deno task build
-deno task check
-deno task desktop
 ```
 
-- `deno task dev`: starts the Vite web UI at `127.0.0.1`.
-- `deno task build`: builds the web UI into `dist/`.
-- `deno task check`: type-checks the web and desktop entry points.
-- `deno task desktop`: builds the UI and opens it with `deno desktop`.
-- `deno task desktop:dev`: opens the desktop shell with HMR.
-
-### Basic Usage
-
-1. Start the app with `deno task dev` or `deno task desktop`.
-2. Click `Add Widget`.
-3. Choose a recent file or browse for a local file.
-4. Use the widget header to select a widget.
-5. Use the split buttons to change the default add direction or affect the selected widget.
-
-Keyboard shortcuts:
-
-- `Cmd/Ctrl+O`: open a document in the main document state.
-- `Cmd/Ctrl+S`: save the current state.
-- `Cmd/Ctrl+E`: export the current document.
-- `Cmd/Ctrl+P`: open the file picker.
-- `Esc`: restore a maximized widget.
-
-## 日本語
-
-mdwys は Deno、Vite、React で作られたローカル向けの Markdown / ファイル作業スペースです。移動・リサイズ可能なWidget上で、Markdown、テキスト、HTML、PDF、画像ファイルを表示・編集できます。
-
-### 機能
-
-- Markdown は Preview、WYSIWYG、Raw の3モードに対応。
-- File Widget で Markdown、テキスト、HTML、PDF、一般的な画像形式を開けます。
-- `Add Widget` は先にファイルピッカーを開き、ファイル選択後にWidgetを作成します。
-- Widget は移動、リサイズ、最大化、復元、削除、ヘッダークリックでの選択に対応。
-- 分割ボタンで縦/横の追加デフォルト、選択中Widgetへの分割反映、全体再整列を操作できます。
-- Widget は最大9個まで。Add時は小さすぎる余り領域ができにくいように正規化します。
-- 現在のドキュメントとダッシュボード状態は `localStorage` に保存されます。
-
-### 必要環境
-
-- Deno 2.9.0 以上
-
-### コマンド
+Run the web UI:
 
 ```bash
-deno install --allow-scripts
 deno task dev
-deno task build
-deno task check
+```
+
+Run the desktop app in Wails dev mode:
+
+```bash
 deno task desktop
 ```
 
-- `deno task dev`: Vite のWeb UIを `127.0.0.1` で起動します。
-- `deno task build`: Web UIを `dist/` にビルドします。
-- `deno task check`: Web / desktop のエントリポイントを型チェックします。
-- `deno task desktop`: UIをビルドして `deno desktop` で起動します。
-- `deno task desktop:dev`: HMR付きでdesktop shellを起動します。
+Type-check and build the frontend:
 
-### 基本操作
+```bash
+deno task check
+deno task build
+```
 
-1. `deno task dev` または `deno task desktop` で起動します。
-2. `Add Widget` をクリックします。
-3. 最近使ったファイル、またはローカルファイルを選びます。
-4. Widgetヘッダーをクリックすると、そのWidgetが選択状態になります。
-5. 分割ボタンで追加方向の切り替え、選択中Widgetへの分割反映、全体整列を行います。
+Build the desktop app:
 
-ショートカット:
+```bash
+deno task desktop:build
+```
 
-- `Cmd/Ctrl+O`: メインドキュメントとしてファイルを開く。
-- `Cmd/Ctrl+S`: 現在の状態を保存。
-- `Cmd/Ctrl+E`: 現在のドキュメントをエクスポート。
-- `Cmd/Ctrl+P`: ファイルピッカーを開く。
-- `Esc`: 最大化したWidgetを元に戻す。
+Build a Windows ARM64 binary manually:
+
+```bash
+go run github.com/wailsapp/wails/v2/cmd/wails@v2.10.2 build -platform windows/arm64 -nopackage -o mdwys-windows-arm64.exe
+```
+
+## Release
+
+Push a `v*` tag to build a draft GitHub Release:
+
+```bash
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+The release workflow builds Linux, macOS, and Windows binaries and uploads them as direct executable artifacts.

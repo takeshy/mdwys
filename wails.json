@@ -1,0 +1,14 @@
+{
+  "$schema": "https://wails.io/schemas/config.v2.json",
+  "name": "mdwys",
+  "outputfilename": "mdwys",
+  "frontend:dir": ".",
+  "frontend:install": "deno install --allow-scripts",
+  "frontend:build": "deno task build",
+  "frontend:dev:watcher": "deno task dev",
+  "frontend:dev:serverUrl": "http://127.0.0.1:5173",
+  "author": {
+    "name": "takeshy",
+    "email": ""
+  }
+}

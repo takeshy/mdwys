@@ -3,9 +3,9 @@
     "dev": "vite --host 127.0.0.1",
     "build": "vite build",
     "preview": "vite preview --host 127.0.0.1",
-    "desktop": "deno task build && deno desktop --allow-read=dist --allow-net=127.0.0.1 desktop/main.ts",
-    "desktop:dev": "deno desktop --hmr --allow-read=dist --allow-net=127.0.0.1 desktop/main.ts",
-    "check": "deno check src/main.tsx desktop/main.ts"
+    "desktop": "go run github.com/wailsapp/wails/v2/cmd/wails@v2.10.2 dev",
+    "desktop:build": "go run github.com/wailsapp/wails/v2/cmd/wails@v2.10.2 build",
+    "check": "deno check src/main.tsx"
   },
   "nodeModulesDir": "auto",
   "unstable": [
