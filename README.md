@@ -45,7 +45,6 @@ Release artifacts are built for:
 
 - `mdwys-linux-amd64`
 - `mdwys-linux-arm64`
-- `mdwys-darwin-amd64`
 - `mdwys-darwin-arm64`
 - `mdwys-windows-amd64.exe`
 - `mdwys-windows-arm64.exe`

@@ -45,7 +45,6 @@ Release では以下の実行ファイルを作成します。
 
 - `mdwys-linux-amd64`
 - `mdwys-linux-arm64`
-- `mdwys-darwin-amd64`
 - `mdwys-darwin-arm64`
 - `mdwys-windows-amd64.exe`
 - `mdwys-windows-arm64.exe`
