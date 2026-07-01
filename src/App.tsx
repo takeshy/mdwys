@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Check, Columns2, LayoutDashboard, Moon, Rows2, Sun, X } from "lucide-react";
 import { DashboardView } from "./dashboard/DashboardView";
 import { DASHBOARD_STORAGE_KEY, defaultDashboard, type DashboardData } from "./dashboard/types";
+import { epubToHtml, isEpubFileName } from "./lib/epub";
 
 export type MarkdownMode = "preview" | "wysiwyg" | "raw";
 export type EqualizeLayoutDirection = "vertical" | "horizontal";
@@ -76,6 +77,45 @@ function dataUrlToBlob(dataUrl: string): Blob | null {
   return new Blob([bytes], { type: mimeType });
 }
 
+function isBinaryPreviewFileName(fileName: string): boolean {
+  return /\.(avif|bmp|gif|jpe?g|pdf|png|svg|webp)$/i.test(fileName);
+}
+
+function persistenceContent(fileName: string, content: string): string {
+  return isBinaryPreviewFileName(fileName) && content.startsWith("data:") ? "" : content;
+}
+
+function persistenceDashboard(dashboard: DashboardData): DashboardData {
+  return {
+    ...dashboard,
+    widgets: dashboard.widgets.map((widget) => {
+      const fileName = typeof widget.config.fileName === "string" ? widget.config.fileName : "";
+      const content = typeof widget.config.content === "string" ? widget.config.content : "";
+      if (!fileName || !content || persistenceContent(fileName, content) === content) return widget;
+
+      return {
+        ...widget,
+        config: {
+          ...widget.config,
+          content: "",
+        },
+      };
+    }),
+  };
+}
+
+function persistLocalState(fileName: string, content: string, dashboard?: DashboardData) {
+  try {
+    localStorage.setItem(STORAGE_KEY, persistenceContent(fileName, content));
+    localStorage.setItem(NAME_KEY, fileName);
+    if (dashboard) {
+      localStorage.setItem(DASHBOARD_STORAGE_KEY, JSON.stringify(persistenceDashboard(dashboard)));
+    }
+  } catch (error) {
+    console.warn("Could not persist current document.", error);
+  }
+}
+
 function downloadFile(fileName: string, content: string) {
   const dataBlob = content.startsWith("data:") ? dataUrlToBlob(content) : null;
   const blob = dataBlob ?? new Blob([content], { type: "text/plain;charset=utf-8" });
@@ -88,7 +128,11 @@ function downloadFile(fileName: string, content: string) {
 }
 
 function checkpointHash(fileName: string, content: string, dashboard: DashboardData): string {
-  return JSON.stringify({ fileName, content, dashboard });
+  return JSON.stringify({
+    fileName,
+    content: persistenceContent(fileName, content),
+    dashboard: persistenceDashboard(dashboard),
+  });
 }
 
 function reasonLabel(reason: CheckpointReason): string {
@@ -153,8 +197,8 @@ export default function App() {
       timestamp: new Date(),
       reason,
       fileName: latest.fileName,
-      content: latest.content,
-      dashboard: structuredClone(latest.dashboard),
+      content: persistenceContent(latest.fileName, latest.content),
+      dashboard: persistenceDashboard(latest.dashboard),
     };
 
     setCheckpoints((items) => [...items.slice(-99), checkpoint]);
@@ -167,8 +211,7 @@ export default function App() {
 
   useEffect(() => {
     const id = window.setTimeout(() => {
-      localStorage.setItem(STORAGE_KEY, content);
-      localStorage.setItem(NAME_KEY, fileName);
+      persistLocalState(fileName, content);
       setSavedAt(new Date());
     }, 250);
 
@@ -176,7 +219,11 @@ export default function App() {
   }, [content, fileName]);
 
   useEffect(() => {
-    localStorage.setItem(DASHBOARD_STORAGE_KEY, JSON.stringify(dashboard));
+    try {
+      localStorage.setItem(DASHBOARD_STORAGE_KEY, JSON.stringify(persistenceDashboard(dashboard)));
+    } catch (error) {
+      console.warn("Could not persist dashboard.", error);
+    }
   }, [dashboard]);
 
   useEffect(() => {
@@ -204,6 +251,18 @@ export default function App() {
 
   const openDocument = useCallback((file: File) => {
     const lowerName = file.name.toLowerCase();
+    if (isEpubFileName(lowerName)) {
+      epubToHtml(file).then((html) => {
+        setContent(html);
+        setFileName(file.name || "document.epub");
+        setMarkdownMode("preview");
+      }).catch((error) => {
+        console.error(error);
+        alert("Could not open this EPUB file.");
+      });
+      return;
+    }
+
     const reader = new FileReader();
     reader.addEventListener("load", () => {
       setContent(String(reader.result ?? ""));
@@ -218,9 +277,7 @@ export default function App() {
   }, []);
 
   const saveDocument = useCallback(() => {
-    localStorage.setItem(STORAGE_KEY, content);
-    localStorage.setItem(NAME_KEY, fileName);
-    localStorage.setItem(DASHBOARD_STORAGE_KEY, JSON.stringify(dashboard));
+    persistLocalState(fileName, content, dashboard);
     addCheckpoint("manual", true);
     setSavedAt(new Date());
   }, [content, fileName, dashboard, addCheckpoint]);
@@ -341,7 +398,7 @@ export default function App() {
       <input
         ref={fileInputRef}
         type="file"
-        accept=".md,.markdown,.html,.htm,.pdf,.txt,text/markdown,text/html,text/plain,application/pdf,*/*"
+        accept=".md,.markdown,.html,.htm,.epub,.pdf,.txt,text/markdown,text/html,application/epub+zip,text/plain,application/pdf,*/*"
         className="hidden-input"
         onChange={(event) => {
           const file = event.currentTarget.files?.[0];

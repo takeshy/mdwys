@@ -266,6 +266,16 @@ textarea {
   overflow-y: auto !important;
 }
 
+.wysiwyg-host [data-item-type="button"].--active {
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--border)) !important;
+  background: var(--accent-soft) !important;
+  color: var(--accent) !important;
+}
+
+.wysiwyg-host [data-item-type="button"].--active svg {
+  stroke-width: 2px;
+}
+
 .markdown-preview {
   height: 100%;
   overflow: auto;
@@ -487,7 +497,7 @@ textarea {
 .dashboard-widget {
   position: relative;
   display: grid;
-  grid-template-rows: 34px minmax(0, 1fr);
+  grid-template-rows: 42px minmax(0, 1fr);
   overflow: hidden;
   border: 1px solid var(--border);
   border-radius: 8px;
@@ -505,7 +515,7 @@ textarea {
   border-color: var(--border);
   box-shadow: 0 24px 90px rgb(0 0 0 / 0.32);
   container-type: normal;
-  grid-template-rows: 42px minmax(0, 1fr);
+  grid-template-rows: 48px minmax(0, 1fr);
 }
 
 .dashboard-widget.interacting {
@@ -529,7 +539,7 @@ textarea {
   gap: 8px;
   border-bottom: 1px solid var(--border);
   background: var(--panel-subtle);
-  padding: 0 8px 0 10px;
+  padding: 0 10px 0 12px;
   min-width: 0;
 }
 
@@ -570,6 +580,7 @@ textarea {
 
 .markdown-widget-controls,
 .widget-mode-group,
+.widget-font-group,
 .widget-action-group,
 .widget-more {
   display: flex;
@@ -586,6 +597,10 @@ textarea {
   gap: 3px;
 }
 
+.widget-font-group {
+  gap: 3px;
+}
+
 .widget-mode-group {
   position: absolute;
   left: 50%;
@@ -598,18 +613,18 @@ textarea {
 .widget-header-button,
 .widget-icon-button {
   display: inline-flex;
-  height: 26px;
+  height: 34px;
   align-items: center;
   justify-content: center;
   border: 1px solid var(--border);
-  border-radius: 5px;
+  border-radius: 6px;
   background: var(--panel);
   color: var(--muted);
   cursor: pointer;
 }
 
 .widget-header-button {
-  width: 28px;
+  width: 34px;
   gap: 0;
   padding: 0;
   font-size: 0.78rem;
@@ -620,8 +635,19 @@ textarea {
 }
 
 .widget-icon-button {
-  width: 28px;
+  width: 34px;
   padding: 0;
+}
+
+.widget-header-button svg,
+.widget-icon-button svg {
+  width: 18px;
+  height: 18px;
+}
+
+.widget-icon-button:disabled {
+  cursor: default;
+  opacity: 0.45;
 }
 
 .widget-header-button:hover,
@@ -749,6 +775,19 @@ textarea {
 
 .dashboard-widget-body .markdown-preview {
   padding: 16px;
+}
+
+.dashboard-scaled-preview {
+  height: 100%;
+  min-height: 0;
+}
+
+.dashboard-scaled-preview .markdown-preview {
+  height: 100%;
+}
+
+.dashboard-scaled-preview .markdown-preview > * {
+  max-width: var(--view-content-width, 980px);
 }
 
 .dashboard-widget-body .markdown-preview h1 {

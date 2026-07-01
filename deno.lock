@@ -4,6 +4,7 @@
     "npm:@types/react-dom@^19.2.3": "19.2.3_@types+react@19.2.17",
     "npm:@types/react@^19.2.7": "19.2.17",
     "npm:@vitejs/plugin-react@^5.1.2": "5.2.0_vite@7.3.6",
+    "npm:fflate@~0.8.2": "0.8.3",
     "npm:highlight.js@^11.11.1": "11.11.1",
     "npm:lucide-react@0.563": "0.563.0_react@19.2.7",
     "npm:mermaid@^11.12.2": "11.16.0",
@@ -14,7 +15,7 @@
     "npm:remark-gfm@^4.0.1": "4.0.1",
     "npm:typescript@^6.0.3": "6.0.3",
     "npm:vite@^7.1.7": "7.3.6",
-    "npm:wysimark-lite@~0.27.5": "0.27.5_react@19.2.7_react-dom@19.2.7__react@19.2.7_@types+react@19.2.17"
+    "npm:wysimark-lite@~0.27.7": "0.27.7_react@19.2.7_react-dom@19.2.7__react@19.2.7_@types+react@19.2.17"
   },
   "npm": {
     "@antfu/install-pkg@1.1.0": {
@@ -1301,6 +1302,9 @@
       "optionalPeers": [
         "picomatch"
       ]
+    },
+    "fflate@0.8.3": {
+      "integrity": "sha512-tbZNuJrLwGUp3zshBtdy4W+ORxZuIh8a5ilyIEQDC5rY1f3U20JMry0Ll3WBzU58EZKsEuJFXhb5gwv8CsPvgA=="
     },
     "find-root@1.1.0": {
       "integrity": "sha512-NKfW6bec6GfKc0SGx1e07QZY9PE99u0Bft/0rzSD5k3sO/vwkVUpDUKVm5Gpp5Ue3YfShPFTX2070tDs5kB9Ng=="
@@ -2667,8 +2671,8 @@
       ],
       "bin": true
     },
-    "wysimark-lite@0.27.5_react@19.2.7_react-dom@19.2.7__react@19.2.7_@types+react@19.2.17": {
-      "integrity": "sha512-cUTEGsvzHt/rv3EFvT6Fk1v66h3LvCObu+vBvHpvP058/fOtSeFnuJia5SIxd/r8VlB87ZEdxX5GEIQGD4fKWg==",
+    "wysimark-lite@0.27.7_react@19.2.7_react-dom@19.2.7__react@19.2.7_@types+react@19.2.17": {
+      "integrity": "sha512-jS+OZnxc6aEvGV9g680h2i812w4h2dbUVSQJoobahf1WeDzkMLh9HiboQAXRluGOEeXsjnsXnz92y00VekksWQ==",
       "dependencies": [
         "@emotion/core",
         "@emotion/react",
@@ -2722,6 +2726,7 @@
         "npm:@types/react-dom@^19.2.3",
         "npm:@types/react@^19.2.7",
         "npm:@vitejs/plugin-react@^5.1.2",
+        "npm:fflate@~0.8.2",
         "npm:highlight.js@^11.11.1",
         "npm:lucide-react@0.563",
         "npm:mermaid@^11.12.2",
@@ -2732,7 +2737,7 @@
         "npm:remark-gfm@^4.0.1",
         "npm:typescript@^6.0.3",
         "npm:vite@^7.1.7",
-        "npm:wysimark-lite@~0.27.5"
+        "npm:wysimark-lite@~0.27.7"
       ]
     }
   }

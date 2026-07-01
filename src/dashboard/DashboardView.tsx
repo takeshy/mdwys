@@ -15,11 +15,14 @@ import {
   PenLine,
   Save,
   Search,
+  ZoomIn,
+  ZoomOut,
   Trash2,
   type LucideIcon,
 } from "lucide-react";
 import { MarkdownPreview } from "../components/MarkdownPreview";
 import { WysiwygEditor } from "../components/WysiwygEditor";
+import { epubToHtml, isEpubFileName } from "../lib/epub";
 import type { EqualizeLayoutDirection, MarkdownMode } from "../App";
 import type { DashboardData, DashboardWidget, LayoutPos } from "./types";
 
@@ -28,6 +31,15 @@ const ROW_HEIGHT = 86;
 const MIN_ROW_HEIGHT = 44;
 const GAP = 8;
 const MAX_WIDGETS = 9;
+const DEFAULT_VIEW_FONT_SCALE = 100;
+const MIN_VIEW_FONT_SCALE = 70;
+const MAX_VIEW_FONT_SCALE = 240;
+const VIEW_FONT_STEP = 10;
+const DEFAULT_VIEW_WIDTH_SCALE = 100;
+const MIN_VIEW_WIDTH_SCALE = 70;
+const MAX_VIEW_WIDTH_SCALE = 180;
+const VIEW_WIDTH_STEP = 10;
+const BASE_VIEW_CONTENT_WIDTH = 1120;
 
 const widgetDefs = [
   { type: "file" as const, label: "File", icon: FileText, size: { w: 7, h: 5 } },
@@ -82,6 +94,28 @@ function isImageFileName(fileName: string) {
   return /\.(avif|bmp|gif|jpe?g|png|svg|webp)$/i.test(fileName);
 }
 
+function readViewFontScale(config: Record<string, unknown>): number {
+  const value = typeof config.viewFontScale === "number" ? config.viewFontScale : DEFAULT_VIEW_FONT_SCALE;
+  return Math.max(MIN_VIEW_FONT_SCALE, Math.min(MAX_VIEW_FONT_SCALE, value));
+}
+
+function nextViewFontScale(current: number, direction: -1 | 1): number {
+  return Math.max(MIN_VIEW_FONT_SCALE, Math.min(MAX_VIEW_FONT_SCALE, current + direction * VIEW_FONT_STEP));
+}
+
+function readViewWidthScale(config: Record<string, unknown>): number {
+  const value = typeof config.viewWidthScale === "number" ? config.viewWidthScale : DEFAULT_VIEW_WIDTH_SCALE;
+  return Math.max(MIN_VIEW_WIDTH_SCALE, Math.min(MAX_VIEW_WIDTH_SCALE, value));
+}
+
+function nextViewWidthScale(current: number, direction: -1 | 1): number {
+  return Math.max(MIN_VIEW_WIDTH_SCALE, Math.min(MAX_VIEW_WIDTH_SCALE, current + direction * VIEW_WIDTH_STEP));
+}
+
+function viewContentWidth(scale: number): string {
+  return `${Math.round(BASE_VIEW_CONTENT_WIDTH * scale / 100)}px`;
+}
+
 function rectIsFree(widgets: DashboardWidget[], x: number, y: number, w: number, h: number) {
   return widgets.every((widget) => {
     const layout = widget.layout;
@@ -120,8 +154,20 @@ function widgetDefaults(type: DashboardWidget["type"], widgets: DashboardWidget[
   };
 }
 
-function HtmlDocumentFrame({ content, title }: { content: string; title: string }) {
+function HtmlDocumentFrame({
+  content,
+  title,
+  fontScale,
+  widthScale,
+}: {
+  content: string;
+  title: string;
+  fontScale: number;
+  widthScale: number;
+}) {
   const [url, setUrl] = useState("");
+  const frameRef = useRef<HTMLIFrameElement>(null);
+  const contentWidth = viewContentWidth(widthScale);
 
   useEffect(() => {
     if (!content) {
@@ -135,9 +181,78 @@ function HtmlDocumentFrame({ content, title }: { content: string; title: string 
     return () => URL.revokeObjectURL(nextUrl);
   }, [content]);
 
+  const applyViewAdjustments = useCallback(() => {
+    const doc = frameRef.current?.contentDocument;
+    if (!doc) return;
+
+    doc.documentElement.style.setProperty("--view-font-scale", `${fontScale}%`);
+    doc.documentElement.style.setProperty("--view-content-width", contentWidth);
+    const styleId = "mdwys-view-adjustments";
+    const style = doc.getElementById(styleId) ?? doc.createElement("style");
+    style.id = styleId;
+    style.textContent = `
+      html { font-size: ${fontScale}% !important; }
+      body {
+        font-size: 1rem !important;
+        line-height: 1.75 !important;
+        padding-left: clamp(12px, 2vw, 28px) !important;
+        padding-right: clamp(12px, 2vw, 28px) !important;
+      }
+      .epub-book {
+        width: min(100%, ${contentWidth}) !important;
+        max-width: none !important;
+      }
+    `;
+    if (!style.parentNode) {
+      doc.head.appendChild(style);
+    }
+  }, [contentWidth, fontScale]);
+
+  useEffect(() => {
+    applyViewAdjustments();
+  }, [applyViewAdjustments]);
+
   if (!url) return <div className="dashboard-empty">Open an HTML file.</div>;
 
-  return <iframe className="dashboard-web" src={url} title={title} sandbox="allow-scripts allow-same-origin allow-forms allow-popups" />;
+  return (
+    <iframe
+      ref={frameRef}
+      className="dashboard-web"
+      src={url}
+      title={title}
+      sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
+      onLoad={applyViewAdjustments}
+      style={{
+        ["--view-font-scale" as string]: `${fontScale}%`,
+        ["--view-content-width" as string]: contentWidth,
+      }}
+    />
+  );
+}
+
+function PdfDocumentFrame({ content, title }: { content: string; title: string }) {
+  const [url, setUrl] = useState("");
+
+  useEffect(() => {
+    if (!content) {
+      setUrl("");
+      return;
+    }
+
+    const blob = content.startsWith("data:") ? dataUrlToBlob(content) : new Blob([content], { type: "application/pdf" });
+    if (!blob) {
+      setUrl("");
+      return;
+    }
+
+    const nextUrl = URL.createObjectURL(blob);
+    setUrl(nextUrl);
+    return () => URL.revokeObjectURL(nextUrl);
+  }, [content]);
+
+  if (!url) return <div className="dashboard-empty">Open a PDF file.</div>;
+
+  return <iframe className="dashboard-web" src={url} title={title} />;
 }
 
 function WidgetBody({
@@ -159,14 +274,17 @@ function WidgetBody({
     const markdownMode = widget.config.mode === "preview" || widget.config.mode === "wysiwyg" || widget.config.mode === "raw"
       ? widget.config.mode
       : readFileMode(fileName);
+    const viewFontScale = readViewFontScale(widget.config);
+    const viewWidthScale = readViewWidthScale(widget.config);
     const lowerName = fileName.toLowerCase();
     const isMarkdown = lowerName.endsWith(".md") || lowerName.endsWith(".markdown");
     const isHtml = lowerName.endsWith(".html") || lowerName.endsWith(".htm");
+    const isEpub = isEpubFileName(lowerName);
     const isPdf = lowerName.endsWith(".pdf");
     const isImage = isImageFileName(fileName);
 
-    if (isHtml) {
-      return <HtmlDocumentFrame content={documentContent} title={fileName} />;
+    if (isHtml || isEpub) {
+      return <HtmlDocumentFrame content={documentContent} title={fileName} fontScale={viewFontScale} widthScale={viewWidthScale} />;
     }
 
     if (isImage) {
@@ -180,11 +298,7 @@ function WidgetBody({
     }
 
     if (isPdf) {
-      return documentContent ? (
-        <iframe className="dashboard-web" src={documentContent} title={fileName} />
-      ) : (
-        <div className="dashboard-empty">Open a PDF file.</div>
-      );
+      return <PdfDocumentFrame content={documentContent} title={fileName} />;
     }
 
     if (!isMarkdown) {
@@ -200,7 +314,17 @@ function WidgetBody({
     }
 
     if (markdownMode === "preview") {
-      return <MarkdownPreview content={documentContent} isDark={isDark} />;
+      return (
+        <div
+          className="dashboard-scaled-preview"
+          style={{
+            fontSize: `${viewFontScale}%`,
+            ["--view-content-width" as string]: viewContentWidth(viewWidthScale),
+          }}
+        >
+          <MarkdownPreview content={documentContent} isDark={isDark} />
+        </div>
+      );
     }
     if (markdownMode === "wysiwyg") {
       return (
@@ -225,6 +349,16 @@ function WidgetBody({
 }
 
 function readPickedFile(file: File, onLoad: (fileName: string, content: string, mode: MarkdownMode) => void) {
+  if (isEpubFileName(file.name)) {
+    epubToHtml(file).then((html) => {
+      onLoad(file.name || "document.epub", html, "preview");
+    }).catch((error) => {
+      console.error(error);
+      alert("Could not open this EPUB file.");
+    });
+    return;
+  }
+
   const reader = new FileReader();
   reader.addEventListener("load", () => {
     onLoad(file.name || "document.txt", String(reader.result ?? ""), readFileMode(file.name));
@@ -788,7 +922,7 @@ export function DashboardView({
         ref={pickerInputRef}
         type="file"
         className="hidden-input"
-        accept=".md,.markdown,.html,.htm,.pdf,.txt,.png,.jpg,.jpeg,.gif,.webp,.avif,.bmp,.svg,text/markdown,text/html,text/plain,application/pdf,image/*,*/*"
+        accept=".md,.markdown,.html,.htm,.epub,.pdf,.txt,.png,.jpg,.jpeg,.gif,.webp,.avif,.bmp,.svg,text/markdown,text/html,application/epub+zip,text/plain,application/pdf,image/*,*/*"
         onChange={(event) => {
           const file = event.currentTarget.files?.[0];
           if (file) readPickedFile(file, applyPickedFile);
@@ -814,6 +948,10 @@ export function DashboardView({
                 ? widget.config.mode
                 : readFileMode(widgetFileName);
               const fileIsMarkdown = widgetFileName.toLowerCase().endsWith(".md") || widgetFileName.toLowerCase().endsWith(".markdown");
+              const fileIsHtml = /\.(html?|epub)$/i.test(widgetFileName);
+              const viewFontScale = readViewFontScale(widget.config);
+              const viewWidthScale = readViewWidthScale(widget.config);
+              const canAdjustView = (fileIsMarkdown && widgetMode === "preview") || fileIsHtml;
               const updateFileConfig = (next: Record<string, unknown>) => updateFileWidget(widget.id, next);
               const isMaximized = maximizedWidgetId === widget.id;
               const handleAction = (id: string) => {
@@ -902,6 +1040,46 @@ export function DashboardView({
                             </button>
                           );
                         })}
+                      </div>
+                    )}
+                    {canAdjustView && (
+                      <div className="widget-font-group">
+                        <button
+                          type="button"
+                          className="widget-icon-button"
+                          onClick={() => updateFileConfig({ viewFontScale: nextViewFontScale(viewFontScale, -1) })}
+                          title="Decrease font size"
+                          disabled={viewFontScale <= MIN_VIEW_FONT_SCALE}
+                        >
+                          <ZoomOut size={15} />
+                        </button>
+                        <button
+                          type="button"
+                          className="widget-icon-button"
+                          onClick={() => updateFileConfig({ viewFontScale: nextViewFontScale(viewFontScale, 1) })}
+                          title="Increase font size"
+                          disabled={viewFontScale >= MAX_VIEW_FONT_SCALE}
+                        >
+                          <ZoomIn size={15} />
+                        </button>
+                        <button
+                          type="button"
+                          className="widget-icon-button"
+                          onClick={() => updateFileConfig({ viewWidthScale: nextViewWidthScale(viewWidthScale, -1) })}
+                          title="Narrow content"
+                          disabled={viewWidthScale <= MIN_VIEW_WIDTH_SCALE}
+                        >
+                          <Minimize2 size={15} />
+                        </button>
+                        <button
+                          type="button"
+                          className="widget-icon-button"
+                          onClick={() => updateFileConfig({ viewWidthScale: nextViewWidthScale(viewWidthScale, 1) })}
+                          title="Widen content"
+                          disabled={viewWidthScale >= MAX_VIEW_WIDTH_SCALE}
+                        >
+                          <Maximize2 size={15} />
+                        </button>
                       </div>
                     )}
                     <div className="widget-action-group">
