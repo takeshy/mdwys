@@ -25,7 +25,7 @@ import {
 import { MarkdownPreview } from "../components/MarkdownPreview";
 import { WysiwygEditor } from "../components/WysiwygEditor";
 import { epubToHtml, isEpubFileName } from "../lib/epub";
-import { hasWailsBackend, onWailsFileDrop, openExternalEditor, readLocalFile, selectLocalFilePath } from "../lib/wailsBackend";
+import { hasWailsBackend, onWailsFileDrop, openExternalEditor, readLocalFile, selectLocalFilePath, startupFilePaths } from "../lib/wailsBackend";
 import type { EqualizeLayoutDirection, MarkdownMode } from "../App";
 import type { DashboardData, DashboardWidget, LayoutPos } from "./types";
 
@@ -518,6 +518,7 @@ export function DashboardView({
   const handledEqualizeLayoutRequestRef = useRef(0);
   const handledSplitWidgetRequestRef = useRef(0);
   const hydratedFilePathsRef = useRef(new Set<string>());
+  const handledStartupFilesRef = useRef(false);
   const [recentFiles, setRecentFiles] = useState<RecentFile[]>([]);
   const [filePickerTargetId, setFilePickerTargetId] = useState<string | null>(null);
   const [filePickerCreatesWidget, setFilePickerCreatesWidget] = useState(false);
@@ -839,7 +840,7 @@ export function DashboardView({
 
   const createFileWidget = useCallback(
     (fileName: string, content: string, mode: MarkdownMode, direction: EqualizeLayoutDirection, filePath?: string) => {
-      if (data.widgets.length >= MAX_WIDGETS) return;
+      if (data.widgets.length >= MAX_WIDGETS) return undefined;
       const nextWidget = {
         ...widgetDefaults("file", data.widgets, direction),
         config: { fileName, filePath, content, mode },
@@ -847,6 +848,7 @@ export function DashboardView({
       onChange({ widgets: buildAddedWidgets(data.widgets, nextWidget, direction) });
       recordRecentFile(fileName, content, mode, filePath);
       setActiveWidgetId(nextWidget.id);
+      return nextWidget.id;
     },
     [buildAddedWidgets, data.widgets, onChange, recordRecentFile],
   );
@@ -905,9 +907,9 @@ export function DashboardView({
   const openPathAsWidget = useCallback(
     async (path: string) => {
       const result = await readLocalFile(path);
-      if (!result) return;
+      if (!result) return undefined;
       const content = await prepareOpenedContent(result.fileName, result.content);
-      createFileWidget(result.fileName, content, readFileMode(result.fileName), activeLayoutDirection, result.path);
+      return createFileWidget(result.fileName, content, readFileMode(result.fileName), activeLayoutDirection, result.path);
     },
     [activeLayoutDirection, createFileWidget],
   );
@@ -921,6 +923,38 @@ export function DashboardView({
     },
     [openFileInWidget],
   );
+
+  useEffect(() => {
+    if (!hasWailsBackend() || handledStartupFilesRef.current) return;
+    handledStartupFilesRef.current = true;
+
+    void (async () => {
+      const paths = await startupFilePaths();
+      if (!paths.length) return;
+
+      const emptyWidget = data.widgets.find((widget) => {
+        if (widget.type !== "file") return false;
+        const fileName = typeof widget.config.fileName === "string" ? widget.config.fileName : "";
+        const filePath = typeof widget.config.filePath === "string" ? widget.config.filePath : "";
+        const content = typeof widget.config.content === "string" ? widget.config.content : "";
+        return !fileName && !filePath && !content;
+      });
+
+      for (const [index, path] of paths.entries()) {
+        try {
+          if (index === 0 && emptyWidget) {
+            await openPathInWidget(emptyWidget.id, path);
+            setMaximizedWidgetId(emptyWidget.id);
+          } else {
+            const widgetId = await openPathAsWidget(path);
+            if (index === 0 && widgetId) setMaximizedWidgetId(widgetId);
+          }
+        } catch (error) {
+          console.warn("Could not open startup file.", error);
+        }
+      }
+    })();
+  }, [data.widgets, openPathAsWidget, openPathInWidget]);
 
   const browseLocalFile = useCallback(async () => {
     if (hasWailsBackend()) {

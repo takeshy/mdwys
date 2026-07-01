@@ -9,6 +9,7 @@ interface WailsAppApi {
   SelectLocalFilePath: () => Promise<string>;
   SelectExternalEditor: () => Promise<string>;
   ReadLocalFile: (path: string) => Promise<LocalFileResult>;
+  StartupFilePaths: () => Promise<string[]>;
   OpenExternalEditor: (editorPath: string, filePath: string) => Promise<void>;
 }
 
@@ -51,6 +52,10 @@ export async function selectExternalEditor(): Promise<string> {
 export async function readLocalFile(path: string): Promise<LocalFileResult | null> {
   if (!path) return null;
   return await appApi()?.ReadLocalFile(path) ?? null;
+}
+
+export async function startupFilePaths(): Promise<string[]> {
+  return await appApi()?.StartupFilePaths() ?? [];
 }
 
 export async function openExternalEditor(editorPath: string, filePath: string): Promise<void> {

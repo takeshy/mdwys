@@ -71,6 +71,25 @@ func (a *App) ReadLocalFile(path string) (*LocalFileResult, error) {
 	return readLocalFile(path)
 }
 
+func (a *App) StartupFilePaths() []string {
+	paths := make([]string, 0, len(os.Args)-1)
+	for _, arg := range os.Args[1:] {
+		if arg == "" {
+			continue
+		}
+		path, err := filepath.Abs(arg)
+		if err != nil {
+			continue
+		}
+		stat, err := os.Stat(path)
+		if err != nil || stat.IsDir() {
+			continue
+		}
+		paths = append(paths, path)
+	}
+	return paths
+}
+
 func (a *App) OpenExternalEditor(editorPath string, filePath string) error {
 	if editorPath == "" {
 		return fmt.Errorf("external editor path is empty")
