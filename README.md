@@ -1,6 +1,6 @@
 # mdwys
 
-mdwys is a lightweight local desktop workspace for Markdown and document files. It lets you open files as movable widgets, arrange them in rows or columns, edit Markdown, preview documents, attach timeline-style memos anchored to text in each document, and reload changes made by an external editor.
+mdwys is a lightweight local desktop workspace for Markdown and document files. It lets you open files as movable widgets, arrange them in rows or columns, edit Markdown, preview documents, attach timeline-style memos to text in Markdown, PDF, and EPUB — with the quoted text highlighted in the document — and reload changes made by an external editor.
 
 Built with Go, Wails, Deno, Vite, React, Wysimark, and pdf.js.
 
@@ -15,33 +15,32 @@ Built with Go, Wails, Deno, Vite, React, Wysimark, and pdf.js.
 mdwys aims at the sweet spot between a file previewer and an IDE: a single lightweight app that launches instantly from a double-click and covers the everyday loop of reading documents and writing notes.
 
 - **Read a document, take notes right next to it.** Put a tech book (EPUB/PDF) or a spec in one widget and a Markdown memo in another. The row/column widget layout exists for exactly this — one workspace instead of juggling a reader, an editor, and a notes app.
+- **Memos work the same way in Markdown, PDF, and EPUB — with highlights.** Select text in any of them, right-click, and post a memo. The quoted text is highlighted right in the document: hover to preview the memo, click to jump to the timeline entry, click the quote to jump back to the source. And every memo is a plain Markdown file you can read and edit with any tool.
 - **More than a preview, less than an IDE.** The OS preview is look-but-don't-touch, and launching a full IDE for a one-line fix is overkill. mdwys opens a file instantly, handles quick edits in place (WYSIWYG or Raw), and hands serious writing off to your favorite editor with one click — reload picks up the changes when you are done.
 - **Reading comfort you control.** Adjust the EPUB font size and page width to taste. Memo anchors re-resolve the quoted text after reflow, so highlights and jumps keep working.
-- **Notes that stay anchored to the source.** Select text, right-click, memo. Quotes jump back to the exact location, and every memo is a plain Markdown file you can read and edit with any tool.
 
 ## Features
 
-- Open local files as independent widgets.
-- Supported file types: Markdown, plain text, HTML, EPUB, PDF, and common image formats.
+**Widgets and layout**
+
+- Open local files (Markdown, plain text, HTML, EPUB, PDF, images) as independent widgets: move, resize, maximize, and close them, arranged in row- or column-oriented layouts.
+- Open files from the picker, by drag & drop (empty space creates a widget, an existing widget replaces its file), or as startup arguments — mdwys works as an "Open with" target.
+- Local-file widgets are restored after restart.
+
+**Viewing and editing**
+
 - Markdown modes: Preview, WYSIWYG, and Raw.
-- Add, move, resize, maximize, restore, and close widgets.
-- Arrange widgets in row-oriented or column-oriented layouts.
-- Drag and drop a file onto empty space to create a new widget.
-- Drag and drop a file onto an existing widget to replace that widget's file.
-- File paths passed as startup arguments open as widgets, so mdwys works as an "Open with" target for double-clicking files.
-- Set an external editor and open the current widget file from the widget toolbar.
-- Reload a widget from disk after editing the file externally.
-- Keep session history with split and unified diffs.
-- Restore local-file widgets after restart when a file path is available.
-- PDF viewing powered by pdf.js: continuous page rendering, zoom, page navigation, and text selection.
-- Per-document memo timeline: select text and right-click to add a memo with the quote and its location.
-- Anchored memos highlight the quoted text in the document; hovering previews the memo and clicking jumps to the timeline entry. Quotes in the timeline jump back to the document.
-- Memo anchors survive EPUB reflow (font size and width changes) by re-resolving the quoted text.
-- Memo timeline panel per widget: oldest first, collapse to a narrow rail with `«` / `»`, edit, delete, and pin entries, Raw/WYSIWYG composer, `[[wiki links]]` resolved against the memo directory.
-- Memos are plain Markdown timeline files stored in a configurable memo directory, one file per document (see `specs/memo.md`).
-- Memo list in the top toolbar: browse every file that has memos, filter by file name, sorted by last update with paging, and open a file with one click. Each entry shows the memo count and the beginning of the newest memo, so a final note like "done reading" is visible at a glance.
-- UI language: English and Japanese, following the system language with an override in Settings.
-- Light and dark themes.
+- PDF viewing powered by pdf.js: continuous page rendering, zoom, page navigation, and text selection. EPUB with adjustable font size and page width.
+- One-click hand-off to your external editor; reload picks up the changes. Session history with split and unified diffs.
+- Light and dark themes. English and Japanese UI, following the system language.
+
+**Memos**
+
+- Select text in Markdown, PDF, EPUB, HTML, or plain text and right-click to add a memo with the quote and its location; the quoted text is highlighted in the document.
+- Hover a highlight to preview the memo, click to jump to the timeline entry; quotes jump back to the document. Anchors survive EPUB reflow by re-resolving the quoted text.
+- Timeline panel per widget: edit, delete, and pin entries, Raw/WYSIWYG composer, `[[wiki links]]`, collapsible to a narrow rail.
+- Memos are plain Markdown files, one per document, in a configurable memo directory (see `specs/memo.md`).
+- Memo list in the top toolbar: filter by file name, paging, and each entry shows the memo count and the beginning of the newest memo — a final note like "done reading" is visible at a glance.
 
 ## Screenshots
 
@@ -53,7 +52,7 @@ The same workspace with widgets arranged in a row-oriented layout (the screensho
 
 ### Memo Timeline
 
-Select text in a document and right-click "Add to memo" to post a memo with the quote and its location. Anchored entries in the left panel jump back to the document.
+Select text in a Markdown, PDF, or EPUB document and right-click "Add to memo" to post a memo with the quote and its location. The quoted text is highlighted in the document, and anchored entries in the left panel jump back to it.
 
 ![Memo timeline](docs/images/memo_timeline.png)
 
