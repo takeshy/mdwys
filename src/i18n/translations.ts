@@ -141,6 +141,7 @@ export interface TranslationStrings {
   "memoList.filterPlaceholder": string;
   "memoList.empty": string;
   "memoList.loadFailed": string;
+  "memoList.count": string;
 }
 
 const en: TranslationStrings = {
@@ -268,6 +269,7 @@ const en: TranslationStrings = {
   "memoList.filterPlaceholder": "Filter by file name",
   "memoList.empty": "No files with memos found.",
   "memoList.loadFailed": "Could not load the memo list.",
+  "memoList.count": "{count} memos",
 };
 
 const ja: TranslationStrings = {
@@ -395,6 +397,7 @@ const ja: TranslationStrings = {
   "memoList.filterPlaceholder": "ファイル名で絞り込み",
   "memoList.empty": "メモのあるファイルが見つかりません。",
   "memoList.loadFailed": "メモ一覧を読み込めませんでした。",
+  "memoList.count": "{count}件",
 };
 
 const translations: Record<Language, TranslationStrings> = { en, ja };

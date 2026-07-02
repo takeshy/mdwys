@@ -6,6 +6,7 @@ import {
   parseMemoFile,
   replaceEntryBody,
   setEntryPinned,
+  summarizeMemoContent,
   uniqueEntryId,
 } from "./memoTimeline.ts";
 
@@ -141,6 +142,35 @@ Deno.test("deleteEntry removes the target and keeps frontmatter", () => {
   assertEquals(entries.length, 1);
   assertEquals(entries[0].id, "20260702-200000-000");
   assertEquals(deleteEntry(next, "missing"), null);
+});
+
+Deno.test("summarizeMemoContent reports count and newest entry text", () => {
+  const content = appendEntryBlock(fileWithEntries(), SOURCE, buildEntryBlock({
+    createdAt: "2026-07-02T12:00:00.000Z",
+    id: "20260702-210000-000",
+    body: "読了",
+  }));
+  assertEquals(summarizeMemoContent(content), { count: 3, lastText: "読了" });
+});
+
+Deno.test("summarizeMemoContent truncates and collapses newlines", () => {
+  const content = appendEntryBlock("", SOURCE, buildEntryBlock({
+    createdAt: "2026-07-02T12:00:00.000Z",
+    id: "20260702-210000-000",
+    body: "一二三四五\n六七八九十拾壱",
+  }));
+  assertEquals(summarizeMemoContent(content), { count: 1, lastText: "一二三四五 六七八九…" });
+});
+
+Deno.test("summarizeMemoContent falls back to the quote and handles empty files", () => {
+  const content = appendEntryBlock("", SOURCE, buildEntryBlock({
+    createdAt: "2026-07-02T12:00:00.000Z",
+    id: "20260702-210000-000",
+    anchor: "page=3",
+    quote: "引用だけのメモ",
+  }));
+  assertEquals(summarizeMemoContent(content), { count: 1, lastText: "引用だけのメモ" });
+  assertEquals(summarizeMemoContent(""), { count: 0, lastText: "" });
 });
 
 Deno.test("append preserves existing bytes and file stays parseable", () => {

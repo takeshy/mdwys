@@ -2197,6 +2197,14 @@ textarea {
   white-space: nowrap;
 }
 
+.memo-list-item-preview {
+  color: var(--muted);
+  font-size: 0.74rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .memo-list-item-time {
   flex: none;
   color: var(--muted);

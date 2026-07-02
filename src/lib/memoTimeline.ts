@@ -122,6 +122,23 @@ export function parseMemoFile(content: string): MemoFileData {
   return { source, entries };
 }
 
+export interface MemoFileSummary {
+  count: number;
+  lastText: string;
+}
+
+// Memo list preview: entry count plus the newest entry's leading text.
+// Entries are appended oldest to newest (§8.1), so the last block is newest —
+// e.g. a final "読了" memo shows up as-is in the list.
+export function summarizeMemoContent(content: string, maxChars = 10): MemoFileSummary {
+  const { entries } = parseMemoFile(content);
+  const last = entries[entries.length - 1];
+  const collapsed = (last ? last.body || last.quote : "").replace(/\s+/g, " ").trim();
+  const chars = Array.from(collapsed);
+  const lastText = chars.length > maxChars ? `${chars.slice(0, maxChars).join("")}…` : collapsed;
+  return { count: entries.length, lastText };
+}
+
 export interface MemoEntryFields {
   createdAt: string;
   id: string;

@@ -27,7 +27,7 @@ Built with Go, Wails, Deno, Vite, React, Wysimark, and pdf.js.
 - Memo anchors survive EPUB reflow (font size and width changes) by re-resolving the quoted text.
 - Memo timeline panel per widget: oldest first, collapse to a narrow rail with `«` / `»`, edit, delete, and pin entries, Raw/WYSIWYG composer, `[[wiki links]]` resolved against the memo directory.
 - Memos are plain Markdown timeline files stored in a configurable memo directory, one file per document (see `specs/memo.md`).
-- Memo list in the top toolbar: browse every file that has memos, filter by file name, sorted by last update with paging, and open a file with one click.
+- Memo list in the top toolbar: browse every file that has memos, filter by file name, sorted by last update with paging, and open a file with one click. Each entry shows the memo count and the beginning of the newest memo, so a final note like "done reading" is visible at a glance.
 - UI language: English and Japanese, following the system language with an override in Settings.
 - Light and dark themes.
 
@@ -35,13 +35,37 @@ Built with Go, Wails, Deno, Vite, React, Wysimark, and pdf.js.
 
 ### Row Layout
 
+Widgets arranged in a row-oriented layout.
+
 ![Row layout](docs/images/row.png)
 
 ### Column Layout
 
+Widgets arranged in a column-oriented layout.
+
 ![Column layout](docs/images/col.png)
 
+### Memo Timeline
+
+Select text in a document and right-click "Add to memo" to post a memo with the quote and its location. Anchored entries in the left panel jump back to the document.
+
+![Memo timeline](docs/images/memo_timeline.png)
+
+### Memo List
+
+All files that have memos, sorted by last update. Each entry shows the memo count and the beginning of the newest memo.
+
+![Memo list](docs/images/memo_list.png)
+
+### Settings
+
+External editor path, memo directory, and UI language.
+
+![Settings](docs/images/setting.png)
+
 ### External Editor
+
+Open the current widget file in the configured external editor, then reload the widget to pick up the changes.
 
 ![External editor setting](docs/images/external_editor.png)
 
