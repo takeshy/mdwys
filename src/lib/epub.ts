@@ -9,6 +9,11 @@ type ManifestItem = {
   path: string;
 };
 
+export type SpineLinkTarget = {
+  index: number;
+  path: string;
+};
+
 const textDecoder = new TextDecoder();
 
 function decodeText(bytes: Uint8Array): string {
@@ -77,6 +82,37 @@ function dataUrlFor(path: string, mediaType: string, entries: ZipEntries): strin
   return `data:${mediaType || "application/octet-stream"};base64,${bytesToBase64(bytes)}`;
 }
 
+function stripQuery(path: string): string {
+  const index = path.indexOf("?");
+  return index === -1 ? path : path.slice(0, index);
+}
+
+function decodeFragment(fragment: string): string {
+  try {
+    return decodeURIComponent(fragment);
+  } catch {
+    return fragment;
+  }
+}
+
+function epubDomId(spineIndex: number, sourceId: string): string {
+  return `epub-c${spineIndex + 1}-${sourceId}`;
+}
+
+export function resolveEpubHref(href: string, chapter: SpineLinkTarget, spineByPath: Map<string, SpineLinkTarget>): string | null {
+  if (!href || /^[a-z][a-z0-9+.-]*:/i.test(href)) return href || null;
+
+  const hashIndex = href.indexOf("#");
+  const pathPart = hashIndex === -1 ? href : href.slice(0, hashIndex);
+  const fragment = hashIndex === -1 ? "" : href.slice(hashIndex + 1);
+  const targetPath = pathPart ? stripQuery(joinPath(chapter.path, pathPart)) : chapter.path;
+  const target = spineByPath.get(targetPath);
+
+  if (!target) return null;
+  if (fragment) return `#${epubDomId(target.index, decodeFragment(fragment))}`;
+  return `#epub-chapter-${target.index + 1}`;
+}
+
 function readManifest(opf: Document, opfPath: string): Map<string, ManifestItem> {
   const items = new Map<string, ManifestItem>();
   opf.querySelectorAll("manifest > item").forEach((item) => {
@@ -93,12 +129,25 @@ function readManifest(opf: Document, opfPath: string): Map<string, ManifestItem>
   return items;
 }
 
-function rewriteUrls(root: ParentNode, chapterPath: string, manifestByPath: Map<string, ManifestItem>, entries: ZipEntries) {
+function rewriteIds(root: ParentNode, spineIndex: number) {
+  root.querySelectorAll("[id]").forEach((element) => {
+    const id = attr(element, "id");
+    if (id) element.setAttribute("id", epubDomId(spineIndex, id));
+  });
+}
+
+function rewriteUrls(
+  root: ParentNode,
+  chapter: SpineLinkTarget,
+  manifestByPath: Map<string, ManifestItem>,
+  spineByPath: Map<string, SpineLinkTarget>,
+  entries: ZipEntries,
+) {
   root.querySelectorAll("script").forEach((script) => script.remove());
 
   root.querySelectorAll("[src]").forEach((element) => {
     const source = attr(element, "src");
-    const path = joinPath(chapterPath, source);
+    const path = joinPath(chapter.path, source);
     const item = manifestByPath.get(path);
     const dataUrl = dataUrlFor(path, item?.mediaType || "", entries);
     if (dataUrl) element.setAttribute("src", dataUrl);
@@ -106,8 +155,13 @@ function rewriteUrls(root: ParentNode, chapterPath: string, manifestByPath: Map<
 
   root.querySelectorAll("a[href]").forEach((element) => {
     const href = attr(element, "href");
-    if (!href || href.startsWith("#") || /^[a-z][a-z0-9+.-]*:/i.test(href)) return;
-    element.setAttribute("href", "#");
+    const resolved = resolveEpubHref(href, chapter, spineByPath);
+    if (resolved === href) return;
+    if (!resolved) {
+      element.removeAttribute("href");
+      return;
+    }
+    element.setAttribute("href", resolved);
   });
 }
 
@@ -134,9 +188,11 @@ export async function epubToHtml(file: File): Promise<string> {
 
   if (!spine.length) throw new Error("EPUB spine is empty.");
 
+  const spineByPath = new Map(spine.map((item, index) => [item.path, { index, path: item.path }]));
   const chapters = spine.map((item, index) => {
     const doc = new DOMParser().parseFromString(decodeText(entries[item.path]), "text/html");
-    rewriteUrls(doc, item.path, manifestByPath, entries);
+    rewriteIds(doc, index);
+    rewriteUrls(doc, { index, path: item.path }, manifestByPath, spineByPath, entries);
     const body = doc.body?.innerHTML || "";
     const heading = chapterTitle(doc);
     return `<section class="epub-chapter" id="epub-chapter-${index + 1}">${heading ? `<h1>${escapeHtml(heading)}</h1>` : ""}${body}</section>`;
