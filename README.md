@@ -1,12 +1,23 @@
 # mdwys
 
-mdwys is a local desktop workspace for Markdown and document files. It lets you open files as movable widgets, arrange them in rows or columns, edit Markdown, preview documents, attach timeline-style memos anchored to text in each document, and reload changes made by an external editor.
+mdwys is a lightweight local desktop workspace for Markdown and document files. It lets you open files as movable widgets, arrange them in rows or columns, edit Markdown, preview documents, attach timeline-style memos anchored to text in each document, and reload changes made by an external editor.
 
 Built with Go, Wails, Deno, Vite, React, Wysimark, and pdf.js.
 
 [日本語 README](README_ja.md)
 
-![Column layout](docs/images/col.png)
+![A Markdown memo, a PDF, and an EPUB side by side](docs/images/col.png)
+
+*A Markdown document, a PDF, and an EPUB open side by side in one workspace.*
+
+## Why mdwys?
+
+mdwys aims at the sweet spot between a file previewer and an IDE: a single lightweight app that launches instantly from a double-click and covers the everyday loop of reading documents and writing notes.
+
+- **Read a document, take notes right next to it.** Put a tech book (EPUB/PDF) or a spec in one widget and a Markdown memo in another. The row/column widget layout exists for exactly this — one workspace instead of juggling a reader, an editor, and a notes app.
+- **More than a preview, less than an IDE.** The OS preview is look-but-don't-touch, and launching a full IDE for a one-line fix is overkill. mdwys opens a file instantly, handles quick edits in place (WYSIWYG or Raw), and hands serious writing off to your favorite editor with one click — reload picks up the changes when you are done.
+- **Reading comfort you control.** Adjust the EPUB font size and page width to taste. Memo anchors re-resolve the quoted text after reflow, so highlights and jumps keep working.
+- **Notes that stay anchored to the source.** Select text, right-click, memo. Quotes jump back to the exact location, and every memo is a plain Markdown file you can read and edit with any tool.
 
 ## Features
 
@@ -17,6 +28,7 @@ Built with Go, Wails, Deno, Vite, React, Wysimark, and pdf.js.
 - Arrange widgets in row-oriented or column-oriented layouts.
 - Drag and drop a file onto empty space to create a new widget.
 - Drag and drop a file onto an existing widget to replace that widget's file.
+- File paths passed as startup arguments open as widgets, so mdwys works as an "Open with" target for double-clicking files.
 - Set an external editor and open the current widget file from the widget toolbar.
 - Reload a widget from disk after editing the file externally.
 - Keep session history with split and unified diffs.
@@ -35,15 +47,9 @@ Built with Go, Wails, Deno, Vite, React, Wysimark, and pdf.js.
 
 ### Row Layout
 
-Widgets arranged in a row-oriented layout.
+The same workspace with widgets arranged in a row-oriented layout (the screenshot at the top shows the column-oriented layout).
 
 ![Row layout](docs/images/row.png)
-
-### Column Layout
-
-Widgets arranged in a column-oriented layout.
-
-![Column layout](docs/images/col.png)
 
 ### Memo Timeline
 
@@ -63,12 +69,6 @@ External editor path, memo directory, and UI language.
 
 ![Settings](docs/images/setting.png)
 
-### External Editor
-
-Open the current widget file in the configured external editor, then reload the widget to pick up the changes.
-
-![External editor setting](docs/images/external_editor.png)
-
 ## Install
 
 Download a binary from the GitHub Releases page. The executable does not require Deno or Go at runtime.
@@ -81,6 +81,18 @@ Release artifacts are built for:
 - `mdwys-windows-amd64.exe`
 - `mdwys-windows-arm64.exe`
 
+On Linux and macOS, make the downloaded file executable:
+
+```bash
+chmod +x mdwys-linux-amd64
+```
+
+On macOS, the binary is unsigned, so clear the quarantine attribute on first run:
+
+```bash
+xattr -d com.apple.quarantine mdwys-darwin-arm64
+```
+
 ## Usage
 
 1. Start mdwys.
@@ -88,6 +100,8 @@ Release artifacts are built for:
 3. Choose a local file.
 4. Use the widget toolbar to switch Markdown mode, reload from disk, open the file in an external editor, view history, maximize, or close the widget.
 5. Use the row/column buttons in the top toolbar to control how new widgets are arranged.
+
+Files can also be opened by dragging them onto the window or by passing paths as startup arguments (`mdwys note.md book.epub`).
 
 For external editor integration, open Settings and set the editor executable path. On Windows, for example:
 
@@ -164,8 +178,8 @@ go run github.com/wailsapp/wails/v2/cmd/wails@v2.10.2 build -platform windows/ar
 Push a `v*` tag to build a draft GitHub Release:
 
 ```bash
-git tag v0.1.0
-git push origin v0.1.0
+git tag v0.7.0
+git push origin v0.7.0
 ```
 
 The release workflow builds Linux, macOS, and Windows binaries and uploads them as direct executable artifacts.

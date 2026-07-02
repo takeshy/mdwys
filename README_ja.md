@@ -1,12 +1,23 @@
 # mdwys
 
-mdwys は、Markdown やドキュメントファイルをローカルで扱う desktop workspace です。ファイルを widget として開き、行・列に並べたり、Markdown を編集したり、PDF / EPUB / HTML / 画像を参照したり、ドキュメント内のテキストに紐づく Timeline 形式のメモを残したりできます。
+mdwys は、Markdown やドキュメントファイルをローカルで扱う軽量な desktop workspace です。ファイルを widget として開き、行・列に並べたり、Markdown を編集したり、PDF / EPUB / HTML / 画像を参照したり、ドキュメント内のテキストに紐づく Timeline 形式のメモを残したりできます。
 
 Go、Wails、Deno、Vite、React、Wysimark、pdf.js で作っています。
 
 [English README](README.md)
 
-![列レイアウト](docs/images/col.png)
+![Markdown メモ・PDF・EPUB を並べたワークスペース](docs/images/col.png)
+
+*Markdown ドキュメント・PDF・EPUB を 1 つのワークスペースに並べて表示。*
+
+## なぜ mdwys?
+
+mdwys が狙うのは「プレビュー以上、IDE 未満」の立ち位置です。ダブルクリックから瞬時に立ち上がる 1 つの軽量アプリで、「資料を読む・メモを書く」という日常のループを完結させます。
+
+- **資料を読みながら、横でメモをとる。** 左に技術書の EPUB や PDF、右に Markdown のメモ。widget の行・列レイアウトはまさにこのためにあります。リーダー・エディタ・メモアプリを行き来せず、1 つのワークスペースで済みます。
+- **サクッと見て、サクッと直して、本気の編集は外部エディタへ。** OS のプレビューは見るだけ、1 行直すために IDE を立ち上げるのは大げさ。mdwys はすぐにファイルを開いてその場で軽く編集でき(WYSIWYG / Raw)、本格的に書くときは使い慣れたエディタへワンクリックで引き継ぎ、reload で変更を取り込みます。
+- **読みやすさを自分で作る。** EPUB はフォントサイズや幅を好みに調整できます。リフロー後もメモのアンカーは引用文字列の再解決で追従するので、ハイライトとジャンプは機能し続けます。
+- **メモは本文の該当箇所に紐づく。** テキストを選択して右クリックでメモ。引用から元の位置へジャンプでき、メモはただの Markdown ファイルなので任意のツールでそのまま読み書きできます。
 
 ## 主な機能
 
@@ -17,6 +28,7 @@ Go、Wails、Deno、Vite、React、Wysimark、pdf.js で作っています。
 - 行方向・列方向のレイアウト切り替え。
 - widget がない場所への file drag & drop で新しい widget として開く。
 - 既存 widget への file drag & drop で、その widget のファイルを差し替える。
+- 起動引数に渡したファイルパスを widget として開く。ファイルの「プログラムから開く」先として mdwys を指定すればダブルクリックで開ける。
 - 外部エディタのパスを設定し、widget のファイルを外部エディタで開く。
 - 外部エディタで変更した内容を reload で反映。
 - 履歴モーダルで split / unified diff を確認。
@@ -35,15 +47,9 @@ Go、Wails、Deno、Vite、React、Wysimark、pdf.js で作っています。
 
 ### 行レイアウト
 
-widget を行方向に並べたレイアウト。
+widget を行方向に並べたレイアウト(冒頭のスクリーンショットは列方向のレイアウト)。
 
 ![行レイアウト](docs/images/row.png)
-
-### 列レイアウト
-
-widget を列方向に並べたレイアウト。
-
-![列レイアウト](docs/images/col.png)
 
 ### メモタイムライン
 
@@ -63,12 +69,6 @@ widget を列方向に並べたレイアウト。
 
 ![設定](docs/images/setting.png)
 
-### 外部エディタ設定
-
-設定した外部エディタで widget のファイルを開き、reload で変更を反映します。
-
-![外部エディタ設定](docs/images/external_editor.png)
-
 ## インストール
 
 GitHub Releases から実行ファイルをダウンロードしてください。配布された実行ファイルの起動には Deno や Go は不要です。
@@ -81,6 +81,18 @@ Release では以下の実行ファイルを作成します。
 - `mdwys-windows-amd64.exe`
 - `mdwys-windows-arm64.exe`
 
+Linux / macOS ではダウンロードしたファイルに実行権限を付けてください。
+
+```bash
+chmod +x mdwys-linux-amd64
+```
+
+macOS の binary は未署名のため、初回起動前に quarantine 属性を外してください。
+
+```bash
+xattr -d com.apple.quarantine mdwys-darwin-arm64
+```
+
 ## 使い方
 
 1. mdwys を起動します。
@@ -88,6 +100,8 @@ Release では以下の実行ファイルを作成します。
 3. ローカルファイルを選びます。
 4. widget の toolbar から Markdown mode、reload、外部エディタ起動、history、最大化、閉じる操作を行います。
 5. 画面右上の行・列ボタンで、新しい widget の並び方を切り替えます。
+
+ファイルはウィンドウへの drag & drop や、起動引数(`mdwys note.md book.epub`)でも開けます。
 
 外部エディタ連携を使う場合は、Settings でエディタの実行ファイルパスを設定します。Windows の例:
 
@@ -164,8 +178,8 @@ go run github.com/wailsapp/wails/v2/cmd/wails@v2.10.2 build -platform windows/ar
 `v*` tag を push すると draft GitHub Release を作成します。
 
 ```bash
-git tag v0.1.0
-git push origin v0.1.0
+git tag v0.7.0
+git push origin v0.7.0
 ```
 
 release workflow は Linux、macOS、Windows の binary を build し、zip ではなく直接実行ファイルとして添付します。
