@@ -88,6 +88,7 @@ export const PdfViewer = forwardRef<PdfViewerHandle, {
       slot.wrapper.style.width = `${Math.floor(viewport.width)}px`;
       slot.wrapper.style.height = `${Math.floor(viewport.height)}px`;
       slot.wrapper.style.setProperty("--scale-factor", String(viewport.scale));
+      slot.wrapper.style.setProperty("--total-scale-factor", String(viewport.scale));
       slot.canvas.width = Math.floor(viewport.width * dpr);
       slot.canvas.height = Math.floor(viewport.height * dpr);
       slot.canvas.style.width = `${Math.floor(viewport.width)}px`;

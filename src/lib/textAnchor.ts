@@ -211,26 +211,24 @@ export function clearMemoHighlights(contributorId: string): void {
   });
 }
 
-// §7.3: accent colors readable in both themes, applied as text color. PDF
-// text layers keep their glyphs transparent (the canvas draws them), so those
-// get a translucent background instead.
+// §7.3: Use a background-only highlight. PDF text layers sit on top of a
+// rendered canvas, so changing the text color creates doubled glyphs.
 export const MEMO_HIGHLIGHT_CSS = `
 ::highlight(mdwys-memo) {
-  color: #d97706;
+  background-color: rgb(217 119 6 / 0.28);
 }
 :root.dark ::highlight(mdwys-memo) {
-  color: #fbbf24;
+  background-color: rgb(251 191 36 / 0.28);
 }
 ::highlight(mdwys-memo-flash) {
-  color: #fff;
-  background-color: #d97706;
+  background-color: rgb(217 119 6 / 0.58);
 }
-.textLayer ::highlight(mdwys-memo) {
-  color: transparent;
+.textLayer::highlight(mdwys-memo),
+.textLayer *::highlight(mdwys-memo) {
   background-color: rgb(217 119 6 / 0.32);
 }
-.textLayer ::highlight(mdwys-memo-flash) {
-  color: transparent;
+.textLayer::highlight(mdwys-memo-flash),
+.textLayer *::highlight(mdwys-memo-flash) {
   background-color: rgb(217 119 6 / 0.65);
 }
 `;

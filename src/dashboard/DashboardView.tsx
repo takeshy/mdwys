@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
+import { useCallback, useEffect, useRef, useState, type Dispatch, type PointerEvent as ReactPointerEvent, type SetStateAction } from "react";
 import {
   Code,
   Download,
@@ -290,7 +290,7 @@ export function DashboardView({
   onDeferredHistoryCheckpoint,
 }: {
   data: DashboardData;
-  onChange: (data: DashboardData) => void;
+  onChange: Dispatch<SetStateAction<DashboardData>>;
   documentMarkdown: string;
   onDocumentMarkdownChange: (value: string) => void;
   markdownMode: MarkdownMode;
@@ -344,11 +344,11 @@ export function DashboardView({
 
   const updateWidget = useCallback(
     (nextWidget: DashboardWidget) => {
-      onChange({
-        widgets: data.widgets.map((widget) => (widget.id === nextWidget.id ? nextWidget : widget)),
-      });
+      onChange((current) => ({
+        widgets: current.widgets.map((widget) => (widget.id === nextWidget.id ? nextWidget : widget)),
+      }));
     },
-    [data.widgets, onChange],
+    [onChange],
   );
 
   const recordRecentFile = useCallback((fileName: string, content: string, mode: MarkdownMode, filePath?: string) => {
@@ -647,17 +647,21 @@ export function DashboardView({
 
   const createFileWidget = useCallback(
     (fileName: string, content: string, mode: MarkdownMode, direction: EqualizeLayoutDirection, filePath?: string) => {
-      if (data.widgets.length >= MAX_WIDGETS) return undefined;
-      const nextWidget = {
-        ...widgetDefaults("file", data.widgets, direction),
-        config: { fileName, filePath, content, mode },
-      };
-      onChange({ widgets: buildAddedWidgets(data.widgets, nextWidget, direction) });
+      const nextWidgetId = crypto.randomUUID();
+      onChange((current) => {
+        if (current.widgets.length >= MAX_WIDGETS) return current;
+        const nextWidget = {
+          ...widgetDefaults("file", current.widgets, direction),
+          id: nextWidgetId,
+          config: { fileName, filePath, content, mode },
+        };
+        return { widgets: buildAddedWidgets(current.widgets, nextWidget, direction) };
+      });
       recordRecentFile(fileName, content, mode, filePath);
-      setActiveWidgetId(nextWidget.id);
-      return nextWidget.id;
+      setActiveWidgetId(nextWidgetId);
+      return nextWidgetId;
     },
-    [buildAddedWidgets, data.widgets, onChange, recordRecentFile],
+    [buildAddedWidgets, onChange, recordRecentFile],
   );
 
   const openFileInWidget = useCallback(
