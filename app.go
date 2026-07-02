@@ -1,12 +1,14 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"encoding/base64"
 	"fmt"
 	"mime"
 	"os"
 	"path/filepath"
+	"strings"
 
 	wailsruntime "github.com/wailsapp/wails/v2/pkg/runtime"
 )
@@ -57,6 +59,12 @@ func (a *App) SelectLocalFilePath() (string, error) {
 	return path, nil
 }
 
+func (a *App) SelectDirectoryPath() (string, error) {
+	return wailsruntime.OpenDirectoryDialog(a.ctx, wailsruntime.OpenDialogOptions{
+		Title: "Select Memo Directory",
+	})
+}
+
 func (a *App) SelectExternalEditor() (string, error) {
 	return wailsruntime.OpenFileDialog(a.ctx, wailsruntime.OpenDialogOptions{
 		Title: "Select External Editor",
@@ -88,6 +96,127 @@ func (a *App) StartupFilePaths() []string {
 		paths = append(paths, path)
 	}
 	return paths
+}
+
+type MemoFileResult struct {
+	Exists  bool   `json:"exists"`
+	Content string `json:"content"`
+}
+
+// ReadMemoFile reads a memo file as text; a missing file is not an error
+// (specs/memo.md §4.3 treats it as "no memos yet").
+func (a *App) ReadMemoFile(path string) (*MemoFileResult, error) {
+	bytes, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return &MemoFileResult{Exists: false, Content: ""}, nil
+		}
+		return nil, err
+	}
+	return &MemoFileResult{Exists: true, Content: string(bytes)}, nil
+}
+
+type MemoListEntry struct {
+	MemoPath string `json:"memoPath"`
+	Source   string `json:"source"`
+	ModTime  int64  `json:"modTime"`
+}
+
+// ListMemoFiles returns every memo file in the memo directory together with
+// its frontmatter `source:` and modification time (unix milliseconds).
+func (a *App) ListMemoFiles(dir string) ([]MemoListEntry, error) {
+	if dir == "" {
+		return nil, fmt.Errorf("memo directory is empty")
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil, err
+	}
+	result := make([]MemoListEntry, 0, len(entries))
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(strings.ToLower(entry.Name()), ".md") {
+			continue
+		}
+		info, err := entry.Info()
+		if err != nil {
+			continue
+		}
+		path := filepath.Join(dir, entry.Name())
+		result = append(result, MemoListEntry{
+			MemoPath: path,
+			Source:   memoSourceFromFile(path),
+			ModTime:  info.ModTime().UnixMilli(),
+		})
+	}
+	return result, nil
+}
+
+// memoSourceFromFile reads the `source:` value from a memo file's leading
+// frontmatter block without loading the whole file.
+func memoSourceFromFile(path string) string {
+	file, err := os.Open(path)
+	if err != nil {
+		return ""
+	}
+	defer file.Close()
+
+	scanner := bufio.NewScanner(file)
+	if !scanner.Scan() || strings.TrimSpace(scanner.Text()) != "---" {
+		return ""
+	}
+	for scanner.Scan() {
+		line := scanner.Text()
+		if strings.TrimSpace(line) == "---" {
+			break
+		}
+		if strings.HasPrefix(line, "source:") {
+			return strings.TrimSpace(strings.TrimPrefix(line, "source:"))
+		}
+	}
+	return ""
+}
+
+// AppendMemoFile appends a post block to a memo file, creating the file on
+// first post (specs/memo.md §8.1: posting is append-only).
+func (a *App) AppendMemoFile(path string, content string) error {
+	if path == "" {
+		return fmt.Errorf("memo file path is empty")
+	}
+	file, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+	_, err = file.WriteString(content)
+	return err
+}
+
+// WriteMemoFileAtomic rewrites a memo file via temp file + rename
+// (specs/memo.md §8.1: edits/deletes must be atomic).
+func (a *App) WriteMemoFileAtomic(path string, content string) error {
+	if path == "" {
+		return fmt.Errorf("memo file path is empty")
+	}
+	dir := filepath.Dir(path)
+	tmp, err := os.CreateTemp(dir, ".mdwys-memo-*.tmp")
+	if err != nil {
+		return err
+	}
+	tmpPath := tmp.Name()
+	if _, err := tmp.WriteString(content); err != nil {
+		tmp.Close()
+		os.Remove(tmpPath)
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		os.Remove(tmpPath)
+		return err
+	}
+	if err := os.Rename(tmpPath, path); err != nil {
+		os.Remove(tmpPath)
+		return err
+	}
+	return nil
 }
 
 func (a *App) OpenExternalEditor(editorPath string, filePath string) error {

@@ -1,8 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Check, Columns2, LayoutDashboard, Moon, Rows2, Settings, Sun, X } from "lucide-react";
+import { Check, Columns2, LayoutDashboard, Moon, NotebookText, Rows2, Settings, Sun, X } from "lucide-react";
+import { MemoListModal } from "./components/MemoListModal";
 import { DashboardView } from "./dashboard/DashboardView";
 import { DASHBOARD_STORAGE_KEY, defaultDashboard, type DashboardData } from "./dashboard/types";
-import { selectExternalEditor } from "./lib/wailsBackend";
+import { I18nProvider, useI18n } from "./i18n/context";
+import { resolveLanguage, t, type LanguageSetting, type TranslationStrings } from "./i18n/translations";
+import { selectDirectoryPath, selectExternalEditor } from "./lib/wailsBackend";
+
+type Translate = (key: keyof TranslationStrings) => string;
 
 export type MarkdownMode = "preview" | "wysiwyg" | "raw";
 export type EqualizeLayoutDirection = "vertical" | "horizontal";
@@ -40,6 +45,8 @@ interface DiffTarget {
 const STORAGE_KEY = "mdwys:document";
 const NAME_KEY = "mdwys:fileName";
 const EXTERNAL_EDITOR_KEY = "mdwys:externalEditorPath";
+const MEMO_DIR_KEY = "mdwys:memoDirPath";
+const LANGUAGE_KEY = "mdwys:language";
 
 const initialMarkdown = `# mdwys
 
@@ -155,30 +162,30 @@ function checkpointHash(fileName: string, content: string, dashboard: DashboardD
   });
 }
 
-function reasonLabel(reason: CheckpointReason): string {
+function reasonLabel(tr: Translate, reason: CheckpointReason): string {
   switch (reason) {
     case "initial":
-      return "Opened";
+      return tr("history.reason.initial");
     case "idle":
-      return "Idle checkpoint";
+      return tr("history.reason.idle");
     case "blur":
-      return "Focus left";
+      return tr("history.reason.blur");
     case "manual":
-      return "Saved";
+      return tr("history.reason.manual");
     case "restore":
-      return "Restored";
+      return tr("history.reason.restore");
     case "reload":
-      return "Reloaded";
+      return tr("history.reason.reload");
   }
 }
 
-function changedSummary(current: HistoryCheckpoint, previous?: HistoryCheckpoint): string {
-  if (!previous) return "Initial state";
+function changedSummary(tr: Translate, current: HistoryCheckpoint, previous?: HistoryCheckpoint): string {
+  if (!previous) return tr("history.changed.initial");
   const changes: string[] = [];
-  if (current.fileName !== previous.fileName) changes.push("file name");
-  if (current.content !== previous.content) changes.push("document");
-  if (JSON.stringify(current.dashboard) !== JSON.stringify(previous.dashboard)) changes.push("dashboard");
-  return changes.length ? changes.join(", ") : "No content change";
+  if (current.fileName !== previous.fileName) changes.push(tr("history.changed.fileName"));
+  if (current.content !== previous.content) changes.push(tr("history.changed.document"));
+  if (JSON.stringify(current.dashboard) !== JSON.stringify(previous.dashboard)) changes.push(tr("history.changed.dashboard"));
+  return changes.length ? changes.join(", ") : tr("history.changed.none");
 }
 
 function uniqueCheckpoints(items: HistoryCheckpoint[]): HistoryCheckpoint[] {
@@ -315,10 +322,11 @@ function checkpointDiffStats(previous?: HistoryCheckpoint, checkpoint?: HistoryC
 }
 
 function DiffModeToggle({ value, onChange }: { value: DiffViewMode; onChange: (value: DiffViewMode) => void }) {
+  const { t: tr } = useI18n();
   return (
     <div className="diff-mode-toggle">
-      <button type="button" className={value === "unified" ? "active" : ""} onClick={() => onChange("unified")}>Unified</button>
-      <button type="button" className={value === "split" ? "active" : ""} onClick={() => onChange("split")}>Split</button>
+      <button type="button" className={value === "unified" ? "active" : ""} onClick={() => onChange("unified")}>{tr("history.unified")}</button>
+      <button type="button" className={value === "split" ? "active" : ""} onClick={() => onChange("split")}>{tr("history.split")}</button>
     </div>
   );
 }
@@ -382,11 +390,12 @@ function HistoryDiffPanel({
   viewMode: DiffViewMode;
   onViewModeChange: (value: DiffViewMode) => void;
 }) {
+  const { t: tr } = useI18n();
   if (!checkpoint) {
-    return <div className="history-diff-empty">Select a checkpoint.</div>;
+    return <div className="history-diff-empty">{tr("history.selectCheckpoint")}</div>;
   }
   if (!previous) {
-    return <div className="history-diff-empty">No previous checkpoint.</div>;
+    return <div className="history-diff-empty">{tr("history.noPrevious")}</div>;
   }
 
   const target = checkpointDiffTargets(previous, checkpoint)[0];
@@ -395,12 +404,12 @@ function HistoryDiffPanel({
       <section className="history-diff-panel">
         <header className="history-diff-header">
           <div>
-            <strong>Diff</strong>
-            <span>No text content changes</span>
+            <strong>{tr("history.diff")}</strong>
+            <span>{tr("history.noTextChanges")}</span>
           </div>
           <DiffModeToggle value={viewMode} onChange={onViewModeChange} />
         </header>
-        <div className="history-diff-empty">No document diff.</div>
+        <div className="history-diff-empty">{tr("history.noDocumentDiff")}</div>
       </section>
     );
   }
@@ -413,7 +422,7 @@ function HistoryDiffPanel({
     <section className="history-diff-panel">
       <header className="history-diff-header">
         <div>
-          <strong>Diff</strong>
+          <strong>{tr("history.diff")}</strong>
           <span>
             {target.label}{" "}
             <span className="history-added">+{stats.additions}</span>
@@ -424,7 +433,7 @@ function HistoryDiffPanel({
         <DiffModeToggle value={viewMode} onChange={onViewModeChange} />
       </header>
       {!hasDiff ? (
-        <div className="history-diff-empty">No document diff.</div>
+        <div className="history-diff-empty">{tr("history.noDocumentDiff")}</div>
       ) : viewMode === "split" ? (
         <SplitDiffView lines={lines} />
       ) : (
@@ -452,6 +461,15 @@ export default function App() {
   const [selectedHistoryId, setSelectedHistoryId] = useState<string | null>(null);
   const [historyDiffViewMode, setHistoryDiffViewMode] = useState<DiffViewMode>("split");
   const [externalEditorPath, setExternalEditorPath] = useState(() => readStored(EXTERNAL_EDITOR_KEY, ""));
+  const [memoDirPath, setMemoDirPath] = useState(() => readStored(MEMO_DIR_KEY, ""));
+  const [languageSetting, setLanguageSetting] = useState<LanguageSetting>(() => {
+    const stored = readStored(LANGUAGE_KEY, "system");
+    return stored === "en" || stored === "ja" ? stored : "system";
+  });
+  const language = resolveLanguage(languageSetting, navigator.language);
+  const tr = useCallback((key: keyof TranslationStrings) => t(language, key), [language]);
+  const [memoListOpen, setMemoListOpen] = useState(false);
+  const [openPathRequest, setOpenPathRequest] = useState<{ id: number; path: string }>({ id: 0, path: "" });
   const visibleCheckpoints = uniqueCheckpoints(checkpoints);
   const selectedHistoryCheckpoint = visibleCheckpoints.find((item) => item.id === selectedHistoryId) ?? visibleCheckpoints.at(-1);
   const selectedHistoryPrevious = selectedHistoryCheckpoint
@@ -479,6 +497,22 @@ export default function App() {
       console.warn("Could not persist external editor path.", error);
     }
   }, [externalEditorPath]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(MEMO_DIR_KEY, memoDirPath);
+    } catch (error) {
+      console.warn("Could not persist memo directory path.", error);
+    }
+  }, [memoDirPath]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(LANGUAGE_KEY, languageSetting);
+    } catch (error) {
+      console.warn("Could not persist language setting.", error);
+    }
+  }, [languageSetting]);
 
   useEffect(() => {
     latestStateRef.current = { fileName, content, dashboard };
@@ -545,11 +579,11 @@ export default function App() {
   }, [addCheckpoint]);
 
   const newDocument = useCallback(() => {
-    if (content.trim() && !confirm("Create a new document and replace the current editor content?")) return;
+    if (content.trim() && !confirm(tr("app.newDocumentConfirm"))) return;
     setContent("# Untitled\n\n");
     setFileName("untitled.md");
     setMarkdownMode("wysiwyg");
-  }, [content]);
+  }, [content, tr]);
 
   const saveDocument = useCallback(() => {
     persistLocalState(fileName, content, dashboard);
@@ -620,6 +654,7 @@ export default function App() {
   }, [exportDocument, newDocument, saveDocument]);
 
   return (
+    <I18nProvider language={language}>
     <main className="app-shell">
       <header className="topbar">
         <div className="document-meta">
@@ -632,9 +667,9 @@ export default function App() {
             type="button"
             className="global-command"
             onClick={() => setAddWidgetRequest((value) => ({ id: value.id + 1, direction: activeLayoutDirectionRef.current }))}
-            title="Add widget"
+            title={tr("topbar.addWidget")}
           >
-            <span>+ Add Widget</span>
+            <span>{tr("topbar.addWidget")}</span>
           </button>
           <button
             type="button"
@@ -648,7 +683,7 @@ export default function App() {
                 setSplitWidgetRequest((value) => ({ id: value.id + 1, direction: "vertical" }));
               }
             }}
-            title="縦に均等"
+            title={tr("topbar.equalizeVertical")}
           >
             <Rows2 size={18} />
           </button>
@@ -664,14 +699,28 @@ export default function App() {
                 setSplitWidgetRequest((value) => ({ id: value.id + 1, direction: "horizontal" }));
               }
             }}
-            title="横に均等"
+            title={tr("topbar.equalizeHorizontal")}
           >
             <Columns2 size={18} />
           </button>
-          <button type="button" className="icon-button" onClick={() => setIsDark((value) => !value)} title="Toggle theme">
+          <button
+            type="button"
+            className="icon-button"
+            onClick={() => {
+              if (!memoDirPath) {
+                if (confirm(tr("memo.dirPrompt"))) setSettingsOpen(true);
+                return;
+              }
+              setMemoListOpen(true);
+            }}
+            title={tr("topbar.memoList")}
+          >
+            <NotebookText size={18} />
+          </button>
+          <button type="button" className="icon-button" onClick={() => setIsDark((value) => !value)} title={tr("topbar.toggleTheme")}>
             {isDark ? <Sun size={18} /> : <Moon size={18} />}
           </button>
-          <button type="button" className="icon-button" onClick={() => setSettingsOpen(true)} title="Settings">
+          <button type="button" className="icon-button" onClick={() => setSettingsOpen(true)} title={tr("topbar.settings")}>
             <Settings size={18} />
           </button>
         </div>
@@ -698,23 +747,37 @@ export default function App() {
           splitWidgetRequest={splitWidgetRequest}
           openFilePickerRequest={openFilePickerRequest}
           externalEditorPath={externalEditorPath}
+          memoDirPath={memoDirPath}
+          onOpenSettings={() => setSettingsOpen(true)}
+          openPathRequest={openPathRequest}
           onHistoryCheckpoint={requestHistoryCheckpoint}
           onDeferredHistoryCheckpoint={requestDeferredHistoryCheckpoint}
         />
       </section>
 
+      {memoListOpen && (
+        <MemoListModal
+          memoDirPath={memoDirPath}
+          onOpenFile={(path) => {
+            setOpenPathRequest((value) => ({ id: value.id + 1, path }));
+            setMemoListOpen(false);
+          }}
+          onClose={() => setMemoListOpen(false)}
+        />
+      )}
+
       {settingsOpen && (
         <div className="settings-backdrop" onClick={() => setSettingsOpen(false)}>
           <section className="settings-modal" onClick={(event) => event.stopPropagation()}>
             <header className="settings-header">
-              <strong>Settings</strong>
-              <button type="button" className="icon-button" onClick={() => setSettingsOpen(false)} title="Close">
+              <strong>{tr("settings.title")}</strong>
+              <button type="button" className="icon-button" onClick={() => setSettingsOpen(false)} title={tr("common.close")}>
                 <X size={18} />
               </button>
             </header>
             <div className="settings-body">
               <label className="settings-field">
-                <span>External editor path</span>
+                <span>{tr("settings.externalEditor")}</span>
                 <div className="settings-path-row">
                   <input
                     value={externalEditorPath}
@@ -729,9 +792,45 @@ export default function App() {
                       if (path) setExternalEditorPath(path);
                     }}
                   >
-                    Browse
+                    {tr("common.browse")}
                   </button>
                 </div>
+              </label>
+              <label className="settings-field">
+                <span>{tr("settings.memoDirectory")}</span>
+                <div className="settings-path-row">
+                  <input
+                    value={memoDirPath}
+                    onChange={(event) => setMemoDirPath(event.target.value)}
+                    placeholder="/home/you/memos"
+                  />
+                  <button
+                    type="button"
+                    className="settings-browse"
+                    onClick={async () => {
+                      const path = await selectDirectoryPath();
+                      if (path) setMemoDirPath(path);
+                    }}
+                  >
+                    {tr("common.browse")}
+                  </button>
+                </div>
+                <small className="settings-hint">{tr("settings.memoDirectoryHint")}</small>
+              </label>
+              <label className="settings-field">
+                <span>{tr("settings.language")}</span>
+                <select
+                  className="settings-select"
+                  value={languageSetting}
+                  onChange={(event) => {
+                    const value = event.target.value;
+                    setLanguageSetting(value === "en" || value === "ja" ? value : "system");
+                  }}
+                >
+                  <option value="system">{tr("settings.languageSystem")}</option>
+                  <option value="en">English</option>
+                  <option value="ja">日本語</option>
+                </select>
               </label>
             </div>
           </section>
@@ -743,10 +842,10 @@ export default function App() {
           <section className="history-modal" onClick={(event) => event.stopPropagation()}>
             <header className="history-header">
               <div>
-                <strong>History</strong>
-                <span>{visibleCheckpoints.length} checkpoints in this session</span>
+                <strong>{tr("history.title")}</strong>
+                <span>{visibleCheckpoints.length} {tr("history.checkpointsSuffix")}</span>
               </div>
-              <button type="button" className="icon-button" onClick={() => setHistoryOpen(false)} title="Close">
+              <button type="button" className="icon-button" onClick={() => setHistoryOpen(false)} title={tr("common.close")}>
                 <X size={18} />
               </button>
             </header>
@@ -761,10 +860,10 @@ export default function App() {
                   return (
                     <article key={checkpoint.id} className={`history-item ${isSelected ? "selected" : ""}`} onClick={() => setSelectedHistoryId(checkpoint.id)}>
                       <div className="history-item-main">
-                        <strong>{reasonLabel(checkpoint.reason)}</strong>
+                        <strong>{reasonLabel(tr, checkpoint.reason)}</strong>
                         <span>{checkpoint.timestamp.toLocaleString()}</span>
                         <small>
-                          {changedSummary(checkpoint, previous)}
+                          {changedSummary(tr, checkpoint, previous)}
                           {previous ? `  +${stats.additions} / -${stats.deletions}` : ""}
                         </small>
                       </div>
@@ -776,15 +875,15 @@ export default function App() {
                           restoreCheckpoint(checkpoint);
                         }}
                         disabled={isCurrent}
-                        title={isCurrent ? "Current state" : "Restore this checkpoint"}
+                        title={isCurrent ? tr("history.currentState") : tr("history.restoreTooltip")}
                       >
                         {isCurrent ? <Check size={16} /> : null}
-                        <span>{isCurrent ? "Current" : "Restore"}</span>
+                        <span>{isCurrent ? tr("history.current") : tr("history.restore")}</span>
                       </button>
                     </article>
                   );
                 })}
-                {visibleCheckpoints.length === 0 && <div className="history-empty">No checkpoints yet.</div>}
+                {visibleCheckpoints.length === 0 && <div className="history-empty">{tr("history.empty")}</div>}
               </div>
               <HistoryDiffPanel
                 checkpoint={selectedHistoryCheckpoint}
@@ -797,5 +896,6 @@ export default function App() {
         </div>
       )}
     </main>
+    </I18nProvider>
   );
 }

@@ -4,11 +4,27 @@ export interface LocalFileResult {
   content: string;
 }
 
+export interface MemoFileResult {
+  exists: boolean;
+  content: string;
+}
+
+export interface MemoListEntry {
+  memoPath: string;
+  source: string;
+  modTime: number;
+}
+
 interface WailsAppApi {
   SelectLocalFile: () => Promise<LocalFileResult | null>;
   SelectLocalFilePath: () => Promise<string>;
+  SelectDirectoryPath: () => Promise<string>;
   SelectExternalEditor: () => Promise<string>;
   ReadLocalFile: (path: string) => Promise<LocalFileResult>;
+  ReadMemoFile: (path: string) => Promise<MemoFileResult>;
+  ListMemoFiles: (dir: string) => Promise<MemoListEntry[] | null>;
+  AppendMemoFile: (path: string, content: string) => Promise<void>;
+  WriteMemoFileAtomic: (path: string, content: string) => Promise<void>;
   StartupFilePaths: () => Promise<string[]>;
   OpenExternalEditor: (editorPath: string, filePath: string) => Promise<void>;
 }
@@ -43,6 +59,32 @@ export async function selectLocalFile(): Promise<LocalFileResult | null> {
 
 export async function selectLocalFilePath(): Promise<string> {
   return await appApi()?.SelectLocalFilePath() ?? "";
+}
+
+export async function selectDirectoryPath(): Promise<string> {
+  return await appApi()?.SelectDirectoryPath() ?? "";
+}
+
+export async function readMemoFile(path: string): Promise<MemoFileResult> {
+  if (!path) return { exists: false, content: "" };
+  return await appApi()?.ReadMemoFile(path) ?? { exists: false, content: "" };
+}
+
+export async function listMemoFiles(dir: string): Promise<MemoListEntry[]> {
+  if (!dir) return [];
+  return await appApi()?.ListMemoFiles(dir) ?? [];
+}
+
+export async function appendMemoFile(path: string, content: string): Promise<void> {
+  const api = appApi();
+  if (!api) throw new Error("Memo files require the desktop app.");
+  await api.AppendMemoFile(path, content);
+}
+
+export async function writeMemoFileAtomic(path: string, content: string): Promise<void> {
+  const api = appApi();
+  if (!api) throw new Error("Memo files require the desktop app.");
+  await api.WriteMemoFileAtomic(path, content);
 }
 
 export async function selectExternalEditor(): Promise<string> {

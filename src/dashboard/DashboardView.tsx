@@ -16,15 +16,16 @@ import {
   RefreshCw,
   Save,
   Search,
+  ExternalLink,
   SquarePen,
   ZoomIn,
   ZoomOut,
   X,
   type LucideIcon,
 } from "lucide-react";
-import { MarkdownPreview } from "../components/MarkdownPreview";
-import { WysiwygEditor } from "../components/WysiwygEditor";
+import { useI18n } from "../i18n/context";
 import { epubToHtml, isEpubFileName } from "../lib/epub";
+import { FileWidgetBody } from "./FileWidgetBody";
 import { hasWailsBackend, onWailsFileDrop, openExternalEditor, readLocalFile, selectLocalFilePath, startupFilePaths } from "../lib/wailsBackend";
 import type { EqualizeLayoutDirection, MarkdownMode } from "../App";
 import type { DashboardData, DashboardWidget, LayoutPos } from "./types";
@@ -42,7 +43,6 @@ const DEFAULT_VIEW_WIDTH_SCALE = 100;
 const MIN_VIEW_WIDTH_SCALE = 70;
 const MAX_VIEW_WIDTH_SCALE = 180;
 const VIEW_WIDTH_STEP = 10;
-const BASE_VIEW_CONTENT_WIDTH = 1120;
 
 const widgetDefs = [
   { type: "file" as const, label: "File", icon: FileText, size: { w: 7, h: 5 } },
@@ -134,10 +134,6 @@ function nextViewWidthScale(current: number, direction: -1 | 1): number {
   return Math.max(MIN_VIEW_WIDTH_SCALE, Math.min(MAX_VIEW_WIDTH_SCALE, current + direction * VIEW_WIDTH_STEP));
 }
 
-function viewContentWidth(scale: number): string {
-  return `${Math.round(BASE_VIEW_CONTENT_WIDTH * scale / 100)}px`;
-}
-
 function rectIsFree(widgets: DashboardWidget[], x: number, y: number, w: number, h: number) {
   return widgets.every((widget) => {
     const layout = widget.layout;
@@ -176,204 +172,6 @@ function widgetDefaults(type: DashboardWidget["type"], widgets: DashboardWidget[
   };
 }
 
-function HtmlDocumentFrame({
-  content,
-  title,
-  fontScale,
-  widthScale,
-}: {
-  content: string;
-  title: string;
-  fontScale: number;
-  widthScale: number;
-}) {
-  const [url, setUrl] = useState("");
-  const frameRef = useRef<HTMLIFrameElement>(null);
-  const contentWidth = viewContentWidth(widthScale);
-
-  useEffect(() => {
-    if (!content) {
-      setUrl("");
-      return;
-    }
-
-    const blob = new Blob([content], { type: "text/html;charset=utf-8" });
-    const nextUrl = URL.createObjectURL(blob);
-    setUrl(nextUrl);
-    return () => URL.revokeObjectURL(nextUrl);
-  }, [content]);
-
-  const applyViewAdjustments = useCallback(() => {
-    const doc = frameRef.current?.contentDocument;
-    if (!doc) return;
-
-    doc.documentElement.style.setProperty("--view-font-scale", `${fontScale}%`);
-    doc.documentElement.style.setProperty("--view-content-width", contentWidth);
-    const styleId = "mdwys-view-adjustments";
-    const style = doc.getElementById(styleId) ?? doc.createElement("style");
-    style.id = styleId;
-    style.textContent = `
-      html { font-size: ${fontScale}% !important; }
-      body {
-        font-size: 1rem !important;
-        line-height: 1.75 !important;
-        padding-left: clamp(12px, 2vw, 28px) !important;
-        padding-right: clamp(12px, 2vw, 28px) !important;
-      }
-      .epub-book {
-        width: min(100%, ${contentWidth}) !important;
-        max-width: none !important;
-      }
-    `;
-    if (!style.parentNode) {
-      doc.head.appendChild(style);
-    }
-  }, [contentWidth, fontScale]);
-
-  useEffect(() => {
-    applyViewAdjustments();
-  }, [applyViewAdjustments]);
-
-  if (!url) return <div className="dashboard-empty">Open an HTML file.</div>;
-
-  return (
-    <iframe
-      ref={frameRef}
-      className="dashboard-web"
-      src={url}
-      title={title}
-      sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
-      onLoad={applyViewAdjustments}
-      style={{
-        ["--view-font-scale" as string]: `${fontScale}%`,
-        ["--view-content-width" as string]: contentWidth,
-      }}
-    />
-  );
-}
-
-function PdfDocumentFrame({ content, title }: { content: string; title: string }) {
-  const [url, setUrl] = useState("");
-
-  useEffect(() => {
-    if (!content) {
-      setUrl("");
-      return;
-    }
-
-    if (content.startsWith("data:")) {
-      setUrl(content);
-      return;
-    }
-
-    const blob = new Blob([content], { type: "application/pdf" });
-    if (!blob) {
-      setUrl("");
-      return;
-    }
-
-    const nextUrl = URL.createObjectURL(blob);
-    setUrl(nextUrl);
-    return () => URL.revokeObjectURL(nextUrl);
-  }, [content]);
-
-  if (!url) return <div className="dashboard-empty">Open a PDF file.</div>;
-
-  return <iframe className="dashboard-web" src={url} title={title} />;
-}
-
-function WidgetBody({
-  widget,
-  fallbackFileName,
-  fallbackContent,
-  isDark,
-  onConfigChange,
-}: {
-  widget: DashboardWidget;
-  fallbackFileName: string;
-  fallbackContent: string;
-  isDark: boolean;
-  onConfigChange: (config: Record<string, unknown>) => void;
-}) {
-  if (widget.type === "file") {
-    const fileName = typeof widget.config.fileName === "string" ? widget.config.fileName : fallbackFileName;
-    const documentContent = typeof widget.config.content === "string" ? widget.config.content : fallbackContent;
-    const markdownMode = widget.config.mode === "preview" || widget.config.mode === "wysiwyg" || widget.config.mode === "raw"
-      ? widget.config.mode
-      : readFileMode(fileName);
-    const viewFontScale = readViewFontScale(widget.config);
-    const viewWidthScale = readViewWidthScale(widget.config);
-    const lowerName = fileName.toLowerCase();
-    const isMarkdown = lowerName.endsWith(".md") || lowerName.endsWith(".markdown");
-    const isHtml = lowerName.endsWith(".html") || lowerName.endsWith(".htm");
-    const isEpub = isEpubFileName(lowerName);
-    const isPdf = lowerName.endsWith(".pdf");
-    const isImage = isImageFileName(fileName);
-
-    if (isHtml || isEpub) {
-      return <HtmlDocumentFrame content={documentContent} title={fileName} fontScale={viewFontScale} widthScale={viewWidthScale} />;
-    }
-
-    if (isImage) {
-      return documentContent ? (
-        <div className="dashboard-image-frame">
-          <img className="dashboard-image" src={documentContent} alt={fileName} />
-        </div>
-      ) : (
-        <div className="dashboard-empty">Open an image file.</div>
-      );
-    }
-
-    if (isPdf) {
-      return <PdfDocumentFrame content={documentContent} title={fileName} />;
-    }
-
-    if (!isMarkdown) {
-      return (
-        <textarea
-        className="raw-editor widget-raw-editor"
-          value={documentContent}
-          onChange={(event) => onConfigChange({ ...widget.config, fileName, content: event.target.value })}
-          spellCheck={false}
-          aria-label="Text file"
-        />
-      );
-    }
-
-    if (markdownMode === "preview") {
-      return (
-        <div
-          className="dashboard-scaled-preview"
-          style={{
-            fontSize: `${viewFontScale}%`,
-            ["--view-content-width" as string]: viewContentWidth(viewWidthScale),
-          }}
-        >
-          <MarkdownPreview content={documentContent} isDark={isDark} />
-        </div>
-      );
-    }
-    if (markdownMode === "wysiwyg") {
-      return (
-        <WysiwygEditor
-          value={documentContent}
-          onChange={(next) => onConfigChange({ ...widget.config, fileName, content: next, mode: markdownMode })}
-        />
-      );
-    }
-    return (
-      <textarea
-        className="raw-editor widget-raw-editor"
-        value={documentContent}
-        onChange={(event) => onConfigChange({ ...widget.config, fileName, content: event.target.value, mode: markdownMode })}
-        spellCheck={false}
-        aria-label="Raw Markdown"
-      />
-    );
-  }
-
-  return null;
-}
 
 function FilePickerDialog({
   query,
@@ -390,6 +188,7 @@ function FilePickerDialog({
   onSelect: (file: RecentFile) => void;
   onClose: () => void;
 }) {
+  const { t: tr } = useI18n();
   const inputRef = useRef<HTMLInputElement | null>(null);
   const normalizedQuery = query.trim().toLowerCase();
   const filteredFiles = recentFiles.filter((file) => file.fileName.toLowerCase().includes(normalizedQuery));
@@ -420,15 +219,15 @@ function FilePickerDialog({
                 if (event.key === "Escape") onClose();
                 if (event.key === "Enter" && filteredFiles[0]) onSelect(filteredFiles[0]);
               }}
-              placeholder="Search recent files"
-              aria-label="Search recent files"
+              placeholder={tr("picker.searchRecent")}
+              aria-label={tr("picker.searchRecent")}
             />
           </div>
           <button type="button" className="file-picker-browse" onClick={onBrowse}>
             <FolderOpen size={16} />
-            <span>Browse</span>
+            <span>{tr("common.browse")}</span>
           </button>
-          <button type="button" className="file-picker-close" onClick={onClose} title="Close">
+          <button type="button" className="file-picker-close" onClick={onClose} title={tr("common.close")}>
             <X size={17} />
           </button>
         </header>
@@ -436,10 +235,10 @@ function FilePickerDialog({
         <div className="file-picker-body">
           <aside className="file-picker-rail">
             <button type="button" className="active">
-              Recent
+              {tr("picker.recent")}
             </button>
             <button type="button" onClick={onBrowse}>
-              Local files
+              {tr("picker.localFiles")}
             </button>
           </aside>
           <div className="file-picker-list">
@@ -454,7 +253,7 @@ function FilePickerDialog({
             ) : (
               <div className="file-picker-empty">
                 <FileText size={24} />
-                <span>No recent files</span>
+                <span>{tr("picker.noRecent")}</span>
               </div>
             )}
           </div>
@@ -484,6 +283,9 @@ export function DashboardView({
   splitWidgetRequest,
   openFilePickerRequest,
   externalEditorPath,
+  memoDirPath,
+  onOpenSettings,
+  openPathRequest,
   onHistoryCheckpoint,
   onDeferredHistoryCheckpoint,
 }: {
@@ -506,15 +308,20 @@ export function DashboardView({
   splitWidgetRequest: { id: number; direction: EqualizeLayoutDirection };
   openFilePickerRequest: number;
   externalEditorPath: string;
+  memoDirPath: string;
+  onOpenSettings: () => void;
+  openPathRequest: { id: number; path: string };
   onHistoryCheckpoint: (reason: "reload") => void;
   onDeferredHistoryCheckpoint: (reason: "reload") => void;
 }) {
+  const { t: tr } = useI18n();
   const [moreOpenId, setMoreOpenId] = useState<string | null>(null);
   const [maximizedWidgetId, setMaximizedWidgetId] = useState<string | null>(null);
   const [activeWidgetId, setActiveWidgetId] = useState<string | null>(null);
   const gridRef = useRef<HTMLDivElement | null>(null);
   const seededRecentFilesRef = useRef(false);
   const handledAddWidgetRequestRef = useRef(0);
+  const handledOpenPathRequestRef = useRef(0);
   const handledEqualizeLayoutRequestRef = useRef(0);
   const handledSplitWidgetRequestRef = useRef(0);
   const hydratedFilePathsRef = useRef(new Set<string>());
@@ -973,12 +780,12 @@ export function DashboardView({
         }
       } catch (error) {
         console.error(error);
-        alert("Could not open this file.");
+        alert(tr("alert.openFileFailed"));
       }
       return;
     }
-    alert("Local file access is available in the Wails desktop app.");
-  }, [activeLayoutDirection, applyPickedFile]);
+    alert(tr("alert.desktopOnly"));
+  }, [activeLayoutDirection, applyPickedFile, tr]);
 
   useEffect(() => {
     if (!hasWailsBackend()) return;
@@ -1045,6 +852,22 @@ export function DashboardView({
     if (openFilePickerRequest > 0) openFilePicker();
   }, [openFilePicker, openFilePickerRequest]);
 
+  // Open-file requests from outside the dashboard (e.g. the memo list modal).
+  useEffect(() => {
+    if (openPathRequest.id <= handledOpenPathRequestRef.current) return;
+    handledOpenPathRequestRef.current = openPathRequest.id;
+    if (!openPathRequest.path) return;
+    void (async () => {
+      try {
+        const widgetId = await openPathAsWidget(openPathRequest.path);
+        if (!widgetId) alert(tr("alert.openFileFailed"));
+      } catch (error) {
+        console.error(error);
+        alert(tr("alert.openFromListFailed"));
+      }
+    })();
+  }, [openPathAsWidget, openPathRequest]);
+
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       const meta = event.metaKey || event.ctrlKey;
@@ -1075,11 +898,11 @@ export function DashboardView({
   ];
 
   const markdownActions = [
-    { id: "new", label: "New", icon: FilePlus },
-    { id: "open", label: "File", icon: FolderOpen },
-    { id: "save", label: "Save", icon: Save },
-    { id: "export", label: "Export", icon: Download },
-    { id: "history", label: "History", icon: History },
+    { id: "new", label: tr("widget.new"), icon: FilePlus },
+    { id: "open", label: tr("widget.file"), icon: FolderOpen },
+    { id: "save", label: tr("widget.save"), icon: Save },
+    { id: "export", label: tr("widget.export"), icon: Download },
+    { id: "history", label: tr("widget.history"), icon: History },
   ];
 
   return (
@@ -1105,10 +928,25 @@ export function DashboardView({
                 : readFileMode(widgetFileName);
               const fileIsMarkdown = widgetFileName.toLowerCase().endsWith(".md") || widgetFileName.toLowerCase().endsWith(".markdown");
               const fileIsHtml = /\.(html?|epub)$/i.test(widgetFileName);
+              const fileIsPdf = /\.pdf$/i.test(widgetFileName);
               const viewFontScale = readViewFontScale(widget.config);
               const viewWidthScale = readViewWidthScale(widget.config);
-              const canAdjustView = (fileIsMarkdown && widgetMode === "preview") || fileIsHtml;
+              const canAdjustView = (fileIsMarkdown && widgetMode === "preview") || fileIsHtml || fileIsPdf;
+              const memoPanelOpen = widget.config.memoPanelOpen === true;
               const updateFileConfig = (next: Record<string, unknown>) => updateFileWidget(widget.id, next);
+              // §3: without a memo directory the feature is disabled and the
+              // icon prompts for settings instead.
+              const toggleMemoPanel = () => {
+                if (!memoDirPath) {
+                  if (confirm(tr("memo.dirPrompt"))) onOpenSettings();
+                  return;
+                }
+                if (!widgetFilePath) {
+                  alert(tr("memo.needsLocalFile"));
+                  return;
+                }
+                updateFileConfig({ memoPanelOpen: !memoPanelOpen, memoPanelCollapsed: false });
+              };
               const isMaximized = maximizedWidgetId === widget.id;
               const handleAction = (id: string) => {
                 if (id === "new") {
@@ -1129,7 +967,7 @@ export function DashboardView({
                   await openExternalEditor(externalEditorPath, widgetFilePath);
                 } catch (error) {
                   console.error(error);
-                  alert("Could not open the external editor.");
+                  alert(tr("alert.externalEditorFailed"));
                 }
               };
               const reloadFromDisk = async () => {
@@ -1143,7 +981,7 @@ export function DashboardView({
                   onDeferredHistoryCheckpoint("reload");
                 } catch (error) {
                   console.error(error);
-                  alert("Could not reload this file.");
+                  alert(tr("alert.reloadFailed"));
                 }
               };
               const beginMove = (event: ReactPointerEvent<HTMLButtonElement>) => {
@@ -1223,7 +1061,7 @@ export function DashboardView({
                           type="button"
                           className="widget-icon-button"
                           onClick={() => updateFileConfig({ viewFontScale: nextViewFontScale(viewFontScale, -1) })}
-                          title="Decrease font size"
+                          title={tr("widget.decreaseFont")}
                           disabled={viewFontScale <= MIN_VIEW_FONT_SCALE}
                         >
                           <ZoomOut size={15} />
@@ -1232,7 +1070,7 @@ export function DashboardView({
                           type="button"
                           className="widget-icon-button"
                           onClick={() => updateFileConfig({ viewFontScale: nextViewFontScale(viewFontScale, 1) })}
-                          title="Increase font size"
+                          title={tr("widget.increaseFont")}
                           disabled={viewFontScale >= MAX_VIEW_FONT_SCALE}
                         >
                           <ZoomIn size={15} />
@@ -1241,7 +1079,7 @@ export function DashboardView({
                           type="button"
                           className="widget-icon-button"
                           onClick={() => updateFileConfig({ viewWidthScale: nextViewWidthScale(viewWidthScale, -1) })}
-                          title="Narrow content"
+                          title={tr("widget.narrow")}
                           disabled={viewWidthScale <= MIN_VIEW_WIDTH_SCALE}
                         >
                           <span className="widget-width-symbol" aria-hidden="true">→←</span>
@@ -1250,7 +1088,7 @@ export function DashboardView({
                           type="button"
                           className="widget-icon-button"
                           onClick={() => updateFileConfig({ viewWidthScale: nextViewWidthScale(viewWidthScale, 1) })}
-                          title="Widen content"
+                          title={tr("widget.widen")}
                           disabled={viewWidthScale >= MAX_VIEW_WIDTH_SCALE}
                         >
                           <span className="widget-width-symbol" aria-hidden="true">←→</span>
@@ -1260,18 +1098,26 @@ export function DashboardView({
                     <div className="widget-action-group">
                       <button
                         type="button"
-                        className="widget-icon-button"
-                        onClick={openInExternalEditor}
-                        title={widgetFilePath ? "Open in external editor" : "Open a local file first"}
-                        disabled={!externalEditorPath || !widgetFilePath}
+                        className={`widget-icon-button ${memoPanelOpen ? "active" : ""}`}
+                        onClick={toggleMemoPanel}
+                        title={tr("widget.memoTimeline")}
                       >
                         <SquarePen size={15} />
                       </button>
                       <button
                         type="button"
                         className="widget-icon-button"
+                        onClick={openInExternalEditor}
+                        title={widgetFilePath ? tr("widget.externalEditorOpen") : tr("widget.openLocalFirst")}
+                        disabled={!externalEditorPath || !widgetFilePath}
+                      >
+                        <ExternalLink size={15} />
+                      </button>
+                      <button
+                        type="button"
+                        className="widget-icon-button"
                         onClick={reloadFromDisk}
-                        title={widgetFilePath ? "Reload from disk" : "Open a local file first"}
+                        title={widgetFilePath ? tr("widget.reload") : tr("widget.openLocalFirst")}
                         disabled={!widgetFilePath}
                       >
                         <RefreshCw size={15} />
@@ -1290,7 +1136,7 @@ export function DashboardView({
                         type="button"
                         className="widget-icon-button"
                         onClick={() => setMoreOpenId((id) => (id === widget.id ? null : widget.id))}
-                        title="More"
+                        title={tr("widget.more")}
                       >
                         <MoreHorizontal size={16} />
                       </button>
@@ -1301,13 +1147,23 @@ export function DashboardView({
                             <button
                               type="button"
                               onClick={() => {
+                                toggleMemoPanel();
+                                setMoreOpenId(null);
+                              }}
+                            >
+                              <SquarePen size={15} />
+                              <span>{tr("widget.memoTimeline")}</span>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => {
                                 void openInExternalEditor();
                                 setMoreOpenId(null);
                               }}
                               disabled={!externalEditorPath || !widgetFilePath}
                             >
-                              <SquarePen size={15} />
-                              <span>External editor</span>
+                              <ExternalLink size={15} />
+                              <span>{tr("widget.externalEditor")}</span>
                             </button>
                             <button
                               type="button"
@@ -1318,7 +1174,7 @@ export function DashboardView({
                               disabled={!widgetFilePath}
                             >
                               <RefreshCw size={15} />
-                              <span>Reload</span>
+                              <span>{tr("widget.reloadShort")}</span>
                             </button>
                             {canAdjustView && (
                               <>
@@ -1329,7 +1185,7 @@ export function DashboardView({
                                   disabled={viewFontScale <= MIN_VIEW_FONT_SCALE}
                                 >
                                   <ZoomOut size={15} />
-                                  <span>Smaller text</span>
+                                  <span>{tr("widget.decreaseFont")}</span>
                                 </button>
                                 <button
                                   type="button"
@@ -1337,7 +1193,7 @@ export function DashboardView({
                                   disabled={viewFontScale >= MAX_VIEW_FONT_SCALE}
                                 >
                                   <ZoomIn size={15} />
-                                  <span>Larger text</span>
+                                  <span>{tr("widget.increaseFont")}</span>
                                 </button>
                                 <button
                                   type="button"
@@ -1345,7 +1201,7 @@ export function DashboardView({
                                   disabled={viewWidthScale <= MIN_VIEW_WIDTH_SCALE}
                                 >
                                   <span className="widget-width-symbol" aria-hidden="true">→←</span>
-                                  <span>Narrow content</span>
+                                  <span>{tr("widget.narrow")}</span>
                                 </button>
                                 <button
                                   type="button"
@@ -1353,7 +1209,7 @@ export function DashboardView({
                                   disabled={viewWidthScale >= MAX_VIEW_WIDTH_SCALE}
                                 >
                                   <span className="widget-width-symbol" aria-hidden="true">←→</span>
-                                  <span>Widen content</span>
+                                  <span>{tr("widget.widen")}</span>
                                 </button>
                               </>
                             )}
@@ -1398,7 +1254,7 @@ export function DashboardView({
                   </div>
                 )}
                 {!isMaximized && (
-                  <button type="button" className="dashboard-move-handle" onPointerDown={beginMove} title="Move">
+                  <button type="button" className="dashboard-move-handle" onPointerDown={beginMove} title={tr("widget.move")}>
                     <GripVertical size={15} />
                   </button>
                 )}
@@ -1406,7 +1262,7 @@ export function DashboardView({
                   <button
                     type="button"
                     onClick={() => setMaximizedWidgetId((id) => (id === widget.id ? null : widget.id))}
-                    title={isMaximized ? "Restore" : "Maximize"}
+                    title={isMaximized ? tr("widget.restoreSize") : tr("widget.maximize")}
                   >
                     {isMaximized ? <Minimize2 size={15} /> : <Maximize2 size={15} />}
                   </button>
@@ -1417,20 +1273,24 @@ export function DashboardView({
                       setActiveWidgetId((id) => (id === widget.id ? null : id));
                       onChange({ widgets: data.widgets.filter((item) => item.id !== widget.id) });
                     }}
-                    title="Delete"
+                    title={tr("widget.close")}
                   >
                     <X size={15} />
                   </button>
                 </div>
               </header>
               <div className="dashboard-widget-body">
-                <WidgetBody
-                  widget={widget}
-                  fallbackFileName={fileName}
-                  fallbackContent={documentMarkdown}
-                  isDark={isDark}
-                  onConfigChange={(config) => updateFileWidget(widget.id, config)}
-                />
+                {widget.type === "file" && (
+                  <FileWidgetBody
+                    widget={widget}
+                    fallbackFileName={fileName}
+                    fallbackContent={documentMarkdown}
+                    isDark={isDark}
+                    onConfigChange={(config) => updateFileWidget(widget.id, config)}
+                    memoDirPath={memoDirPath}
+                    onOpenPath={(path) => void openPathAsWidget(path)}
+                  />
+                )}
               </div>
               {!isMaximized && (
                 <button
@@ -1452,7 +1312,7 @@ export function DashboardView({
                       next: widget.layout,
                     });
                   }}
-                  title="Resize"
+                  title={tr("widget.resize")}
                 >
                   <Maximize2 size={13} />
                 </button>

@@ -1,6 +1,8 @@
 {
   "version": "5",
   "specifiers": {
+    "jsr:@std/assert@*": "1.0.19",
+    "jsr:@std/internal@^1.0.12": "1.0.14",
     "npm:@types/react-dom@^19.2.3": "19.2.3_@types+react@19.2.17",
     "npm:@types/react@^19.2.7": "19.2.17",
     "npm:@vitejs/plugin-react@^5.1.2": "5.2.0_vite@7.3.6",
@@ -8,6 +10,7 @@
     "npm:highlight.js@^11.11.1": "11.11.1",
     "npm:lucide-react@0.563": "0.563.0_react@19.2.7",
     "npm:mermaid@^11.12.2": "11.16.0",
+    "npm:pdfjs-dist@^6.1.200": "6.1.200",
     "npm:react-dom@^19.2.4": "19.2.7_react@19.2.7",
     "npm:react-markdown@^10.1.0": "10.1.0_@types+react@19.2.17_react@19.2.7",
     "npm:react@^19.2.4": "19.2.7",
@@ -16,6 +19,17 @@
     "npm:typescript@^6.0.3": "6.0.3",
     "npm:vite@^7.1.7": "7.3.6",
     "npm:wysimark-lite@~0.27.7": "0.27.7_react@19.2.7_react-dom@19.2.7__react@19.2.7_@types+react@19.2.17"
+  },
+  "jsr": {
+    "@std/assert@1.0.19": {
+      "integrity": "eaada96ee120cb980bc47e040f82814d786fe8162ecc53c91d8df60b8755991e",
+      "dependencies": [
+        "jsr:@std/internal"
+      ]
+    },
+    "@std/internal@1.0.14": {
+      "integrity": "291516b3d4c35024d6ffbc0a9df5bf4c64116e05b50012cf846710152d2ffdf7"
+    }
   },
   "npm": {
     "@antfu/install-pkg@1.1.0": {
@@ -442,6 +456,77 @@
       "integrity": "sha512-oYPyv8A4As1yH5Bx+04iQEQxXuIQDe0GKCNSRgao6z8AM9jixXIfP0vsppRLvGf+nKIOb9/LdpWA4YuJiVvESA==",
       "dependencies": [
         "@chevrotain/types"
+      ]
+    },
+    "@napi-rs/canvas-android-arm64@1.0.2": {
+      "integrity": "sha512-IMXKVQod0ol4vt3gmClUfXz4JAgHYESGPCUqmH3lQxBoL0K/2greJaQE1HVBVxWWFKfLc4OLZVdxg7kXVyXv+g==",
+      "os": ["android"],
+      "cpu": ["arm64"]
+    },
+    "@napi-rs/canvas-darwin-arm64@1.0.2": {
+      "integrity": "sha512-Sc8tPi6cF+5lqOzCCKFALJHhDiRwyMzTPYm3bbhdXsOunU0lQO5f05ucyOzN2r55I23Hg5bsjH63uSCvWp3EgQ==",
+      "os": ["darwin"],
+      "cpu": ["arm64"]
+    },
+    "@napi-rs/canvas-darwin-x64@1.0.2": {
+      "integrity": "sha512-niDXZ9LhKB1zLrUdYB64RHQFDGz9rr0eGx061qtJJU3U20EMMIx28ADF5fVYbhtOgkWQrBjFicfaye1yM0U62A==",
+      "os": ["darwin"],
+      "cpu": ["x64"]
+    },
+    "@napi-rs/canvas-linux-arm-gnueabihf@1.0.2": {
+      "integrity": "sha512-sgatQL9JxGRH/Amzcvu0P3t8Am3duou74CisfuJ41Dwt8cWy723z/9KZ8LlgmxfypEwEZxSTNFJtU8d281lmhQ==",
+      "os": ["linux"],
+      "cpu": ["arm"]
+    },
+    "@napi-rs/canvas-linux-arm64-gnu@1.0.2": {
+      "integrity": "sha512-dgKuX0peF3xwY6ZF5QxGS4wbfDqpoFAJYXiLSp+guZKARQUKMkRqZSDrXKj7nfrec3UCMzC0PFCPte0ES98AiA==",
+      "os": ["linux"],
+      "cpu": ["arm64"]
+    },
+    "@napi-rs/canvas-linux-arm64-musl@1.0.2": {
+      "integrity": "sha512-qwROoDIC9upfvDoRLuPn2aNg9CGW1x0Ygr4k2Or+8paA9d0qBLwk87U+g8KQpoOviKoPoiwl97kvBYuYD7qZoA==",
+      "os": ["linux"],
+      "cpu": ["arm64"]
+    },
+    "@napi-rs/canvas-linux-riscv64-gnu@1.0.2": {
+      "integrity": "sha512-fXRjnPihdnbO6qy1QQOgxAonb68A0TCEG7rj1x7v7rxNElsE8EVIKIEUTvyDtU+sthYSbX+8e7g3oZiLGnOmxw==",
+      "os": ["linux"],
+      "cpu": ["riscv64"]
+    },
+    "@napi-rs/canvas-linux-x64-gnu@1.0.2": {
+      "integrity": "sha512-nPR97DXhbWIAy7yazF3jc06kEPMqYMLmPzFOVNlwKPfIoSChnI+x7dc0hTLaihz3jxrjL6j4BbA7earxfx4X3g==",
+      "os": ["linux"],
+      "cpu": ["x64"]
+    },
+    "@napi-rs/canvas-linux-x64-musl@1.0.2": {
+      "integrity": "sha512-l7zZY5+jL5qnBZtDz7CoBtY6p7EkHu422g/0zWwrOrzIwWyWxZFRfZZORY1UG7YApymPLx+UbOkN206xXn/c1Q==",
+      "os": ["linux"],
+      "cpu": ["x64"]
+    },
+    "@napi-rs/canvas-win32-arm64-msvc@1.0.2": {
+      "integrity": "sha512-yE0koHCFF4PIbMc2o2SEALhnipz7WBISh5glLvQiomtIoCcW0np3H4Lw93ceJAfJttTTeIIWFbwH84F7EVzjMQ==",
+      "os": ["win32"],
+      "cpu": ["arm64"]
+    },
+    "@napi-rs/canvas-win32-x64-msvc@1.0.2": {
+      "integrity": "sha512-okU8/t2foV6C31n0GtvEMbfD5rOFc70+/6xUNME9Guld29sgSOIGUEDScAWFlcP3k5TYQRl9TNkwJEEjh15w8A==",
+      "os": ["win32"],
+      "cpu": ["x64"]
+    },
+    "@napi-rs/canvas@1.0.2": {
+      "integrity": "sha512-EYEqlMYaCbpZDz+IgDH5xp9MTd3ui4dmGqbQYryhMLnSRxrhHKq5KQWHHKxFUcEP4Hp8/BWgvqXocX4j7iSbOQ==",
+      "optionalDependencies": [
+        "@napi-rs/canvas-android-arm64",
+        "@napi-rs/canvas-darwin-arm64",
+        "@napi-rs/canvas-darwin-x64",
+        "@napi-rs/canvas-linux-arm-gnueabihf",
+        "@napi-rs/canvas-linux-arm64-gnu",
+        "@napi-rs/canvas-linux-arm64-musl",
+        "@napi-rs/canvas-linux-riscv64-gnu",
+        "@napi-rs/canvas-linux-x64-gnu",
+        "@napi-rs/canvas-linux-x64-musl",
+        "@napi-rs/canvas-win32-arm64-msvc",
+        "@napi-rs/canvas-win32-x64-msvc"
       ]
     },
     "@rolldown/pluginutils@1.0.0-rc.3": {
@@ -2200,6 +2285,12 @@
     "path-type@4.0.0": {
       "integrity": "sha512-gDKb8aZMDeD/tZWs9P6+q0J9Mwkdl6xMV8TjnGP3qJVJ06bdMgkbBlLU8IdfOsIsFz2BW1rNVT3XuNEl8zPAvw=="
     },
+    "pdfjs-dist@6.1.200": {
+      "integrity": "sha512-o8MolyzirkkLrcdsae/HEOiIcXWI7DS5zGpvqW8xTC2YUsW30rltFw2bDGvw/fskUdEMrQm2br68jzDS5BH2vw==",
+      "optionalDependencies": [
+        "@napi-rs/canvas"
+      ]
+    },
     "picocolors@1.1.1": {
       "integrity": "sha512-xceH2snhtb5M9liqDsmEw56le376mTZkEX/jEb/RxNFyegNul7eNslCXP9FDj/Lcu0X8KEyMceP2ntpaHrDEVA=="
     },
@@ -2730,6 +2821,7 @@
         "npm:highlight.js@^11.11.1",
         "npm:lucide-react@0.563",
         "npm:mermaid@^11.12.2",
+        "npm:pdfjs-dist@^6.1.200",
         "npm:react-dom@^19.2.4",
         "npm:react-markdown@^10.1.0",
         "npm:react@^19.2.4",
