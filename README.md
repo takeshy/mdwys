@@ -36,7 +36,7 @@ mdwys aims at the sweet spot between a file previewer and an IDE: a single light
 
 **Memos**
 
-- Select text in Markdown, PDF, EPUB, HTML, or plain text and right-click to add a memo with the quote and its location; the quoted text is highlighted in the document.
+- Select text in Markdown, PDF, EPUB, HTML, or plain text and right-click to add a memo with the quote and its location; while the memo panel is open, the quoted text is highlighted in the document.
 - Hover a highlight to preview the memo, click to jump to the timeline entry; quotes jump back to the document. Anchors survive EPUB reflow by re-resolving the quoted text.
 - Timeline panel per widget: edit, delete, and pin entries, Raw/WYSIWYG composer, `[[wiki links]]`, collapsible to a narrow rail.
 - Memos are plain Markdown files, one per document, in a configurable memo directory (see `specs/memo.md`).
@@ -113,10 +113,8 @@ C:\Program Files\Neovim\bin\nvim.exe
 1. Open Settings and set the memo directory. The memo feature stays disabled until this is set.
 2. Open a local file in a widget and click the memo icon in the widget toolbar to open the timeline panel on the left.
 3. Select text in the document (Markdown preview, PDF, EPUB, HTML, or plain text) and right-click, then choose "Add to memo". The composer is pre-filled with the quote and its anchor; write your note and post.
-4. Quoted locations are highlighted in the document while the panel is open. Click a highlight to jump to the entry; click a quote in the timeline to jump back to the document.
+4. Click a highlight in the document to jump to its timeline entry; click a quote in the timeline to jump back to the document.
 5. Use the memo list button in the top toolbar to find and reopen any file that has memos.
-
-Each document maps to one Markdown file in the memo directory, so memos can be read and edited with any editor.
 
 ## Keyboard Shortcuts
 
