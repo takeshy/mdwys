@@ -92,6 +92,12 @@ macOS の binary は未署名のため、初回起動前に quarantine 属性を
 xattr -d com.apple.quarantine mdwys-darwin-arm64
 ```
 
+Windows の binary も未署名です。GitHub Releases からダウンロードした実行ファイルを初回起動すると、Microsoft Defender SmartScreen により「Windows によって PC が保護されました」と表示される場合があります。これは配布元の署名や SmartScreen の評価がまだないための警告です。
+
+![Windows SmartScreen warning](docs/images/warning.png)
+
+Release ページから取得した mdwys を実行する場合は、警告画面の `詳細情報` を押してから `実行` を選んでください。出所が不明なファイルではこの操作を行わないでください。
+
 ## 使い方
 
 1. mdwys を起動します。

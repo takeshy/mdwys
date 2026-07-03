@@ -8,6 +8,7 @@ import (
 	"mime"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	wailsruntime "github.com/wailsapp/wails/v2/pkg/runtime"
@@ -59,6 +60,28 @@ func (a *App) SelectLocalFilePath() (string, error) {
 	return path, nil
 }
 
+func (a *App) SelectSaveFilePath(defaultFileName string) (string, error) {
+	if defaultFileName == "" {
+		defaultFileName = "untitled.md"
+	}
+	path, err := wailsruntime.SaveFileDialog(a.ctx, wailsruntime.SaveDialogOptions{
+		Title:           "Save File",
+		DefaultFilename: defaultFileName,
+		Filters: []wailsruntime.FileFilter{
+			{
+				DisplayName: "Markdown",
+				Pattern:     "*.md;*.markdown",
+			},
+			{DisplayName: "All files", Pattern: "*.*"},
+		},
+		CanCreateDirectories: true,
+	})
+	if err != nil {
+		return "", err
+	}
+	return path, nil
+}
+
 func (a *App) SelectDirectoryPath() (string, error) {
 	return wailsruntime.OpenDirectoryDialog(a.ctx, wailsruntime.OpenDialogOptions{
 		Title: "Select Memo Directory",
@@ -77,6 +100,52 @@ func (a *App) SelectExternalEditor() (string, error) {
 
 func (a *App) ReadLocalFile(path string) (*LocalFileResult, error) {
 	return readLocalFile(path)
+}
+
+func (a *App) WriteLocalTextFile(path string, content string) (*LocalFileResult, error) {
+	if path == "" {
+		return nil, fmt.Errorf("file path is empty")
+	}
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		return nil, err
+	}
+	return &LocalFileResult{
+		Path:     path,
+		FileName: filepath.Base(path),
+		Content:  content,
+	}, nil
+}
+
+func (a *App) ListSiblingImageFiles(path string) ([]string, error) {
+	if path == "" {
+		return []string{}, nil
+	}
+	absPath, err := filepath.Abs(path)
+	if err != nil {
+		return nil, err
+	}
+	dir := filepath.Dir(absPath)
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil, err
+	}
+
+	paths := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		if entry.IsDir() || !isSupportedImageFileName(entry.Name()) {
+			continue
+		}
+		paths = append(paths, filepath.Join(dir, entry.Name()))
+	}
+	sort.Slice(paths, func(i, j int) bool {
+		left := stringsToLower(filepath.Base(paths[i]))
+		right := stringsToLower(filepath.Base(paths[j]))
+		if left == right {
+			return paths[i] < paths[j]
+		}
+		return left < right
+	})
+	return paths, nil
 }
 
 func (a *App) StartupFilePaths() []string {
@@ -255,6 +324,15 @@ func readLocalFile(path string) (*LocalFileResult, error) {
 func shouldReadAsDataURL(fileName string) bool {
 	switch stringsToLower(filepath.Ext(fileName)) {
 	case ".avif", ".bmp", ".epub", ".gif", ".jpg", ".jpeg", ".pdf", ".png", ".svg", ".webp":
+		return true
+	default:
+		return false
+	}
+}
+
+func isSupportedImageFileName(fileName string) bool {
+	switch stringsToLower(filepath.Ext(fileName)) {
+	case ".avif", ".bmp", ".gif", ".jpg", ".jpeg", ".png", ".svg", ".webp":
 		return true
 	default:
 		return false

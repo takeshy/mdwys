@@ -73,6 +73,7 @@ export interface TranslationStrings {
   "widget.reloadShort": string;
   "widget.new": string;
   "widget.file": string;
+  "widget.fileTitle": string;
   "widget.save": string;
   "widget.export": string;
   "widget.history": string;
@@ -91,6 +92,8 @@ export interface TranslationStrings {
   "alert.openFileFailed": string;
   "alert.desktopOnly": string;
   "alert.reloadFailed": string;
+  "alert.saveFailed": string;
+  "alert.saveTextOnly": string;
   "alert.externalEditorFailed": string;
   "alert.openFromListFailed": string;
 
@@ -207,6 +210,7 @@ const en: TranslationStrings = {
   "widget.reloadShort": "Reload",
   "widget.new": "New",
   "widget.file": "File",
+  "widget.fileTitle": "File title",
   "widget.save": "Save",
   "widget.export": "Export",
   "widget.history": "History",
@@ -223,6 +227,8 @@ const en: TranslationStrings = {
   "alert.openFileFailed": "Could not open this file.",
   "alert.desktopOnly": "Local file access is available in the Wails desktop app.",
   "alert.reloadFailed": "Could not reload this file.",
+  "alert.saveFailed": "Could not save this file.",
+  "alert.saveTextOnly": "New files can be saved as Markdown. Existing text and HTML files can be overwritten.",
   "alert.externalEditorFailed": "Could not open the external editor.",
   "alert.openFromListFailed": "Could not open the file. It may have been moved or deleted.",
 
@@ -335,6 +341,7 @@ const ja: TranslationStrings = {
   "widget.reloadShort": "再読込",
   "widget.new": "新規",
   "widget.file": "ファイル",
+  "widget.fileTitle": "ファイルタイトル",
   "widget.save": "保存",
   "widget.export": "エクスポート",
   "widget.history": "履歴",
@@ -351,6 +358,8 @@ const ja: TranslationStrings = {
   "alert.openFileFailed": "このファイルを開けませんでした。",
   "alert.desktopOnly": "ローカルファイルへのアクセスはデスクトップアプリでのみ利用できます。",
   "alert.reloadFailed": "このファイルを再読込できませんでした。",
+  "alert.saveFailed": "このファイルを保存できませんでした。",
+  "alert.saveTextOnly": "新規保存は Markdown のみです。既存のテキスト/HTML ファイルは上書きできます。",
   "alert.externalEditorFailed": "外部エディタを起動できませんでした。",
   "alert.openFromListFailed": "ファイルを開けませんでした。移動または削除された可能性があります。",
 

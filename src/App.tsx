@@ -737,7 +737,6 @@ export default function App() {
           fileName={fileName}
           onFileNameChange={setFileName}
           onNewDocument={newDocument}
-          onSaveDocument={saveDocument}
           onExportDocument={exportDocument}
           onHistoryClick={() => setHistoryOpen(true)}
           isDark={isDark}

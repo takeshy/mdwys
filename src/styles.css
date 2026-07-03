@@ -370,14 +370,17 @@ textarea {
 
 .callout-icon {
   display: inline-flex;
-  width: 20px;
-  height: 20px;
+  flex: 0 0 auto;
+  inline-size: 20px;
+  block-size: 20px;
+  aspect-ratio: 1;
   align-items: center;
   justify-content: center;
   border-radius: 999px;
-  background: currentColor;
+  background: var(--callout-color, var(--accent));
   color: var(--panel);
   font-size: 12px;
+  font-weight: 800;
   line-height: 1;
 }
 
@@ -388,18 +391,21 @@ textarea {
 .callout-note,
 .callout-info,
 .callout-todo {
+  --callout-color: #2563eb;
   border-left-color: #2563eb;
   background: color-mix(in srgb, #2563eb 9%, var(--panel));
 }
 
 .callout-tip,
 .callout-success {
+  --callout-color: #059669;
   border-left-color: #059669;
   background: color-mix(in srgb, #059669 9%, var(--panel));
 }
 
 .callout-warning,
 .callout-question {
+  --callout-color: #d97706;
   border-left-color: #d97706;
   background: color-mix(in srgb, #d97706 10%, var(--panel));
 }
@@ -407,6 +413,7 @@ textarea {
 .callout-failure,
 .callout-danger,
 .callout-bug {
+  --callout-color: #dc2626;
   border-left-color: #dc2626;
   background: color-mix(in srgb, #dc2626 8%, var(--panel));
 }
@@ -414,6 +421,7 @@ textarea {
 .callout-example,
 .callout-abstract,
 .callout-quote {
+  --callout-color: #7c3aed;
   border-left-color: #7c3aed;
   background: color-mix(in srgb, #7c3aed 7%, var(--panel));
 }
@@ -579,6 +587,25 @@ textarea {
   color: var(--text);
   font-weight: 700;
   padding: 4px 6px;
+}
+
+.widget-filename-input {
+  width: 100%;
+  min-width: 0;
+  height: 28px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-weight: 700;
+  padding: 4px 6px;
+  outline: none;
+}
+
+.widget-filename-input:focus {
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
+  background: var(--panel);
 }
 
 .markdown-widget-controls,
@@ -1030,7 +1057,7 @@ textarea {
 
 .file-picker-header {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto auto;
+  grid-template-columns: minmax(0, 1fr) auto auto auto;
   align-items: center;
   gap: 10px;
   border-bottom: 1px solid var(--border);

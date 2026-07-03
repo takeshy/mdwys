@@ -92,6 +92,12 @@ On macOS, the binary is unsigned, so clear the quarantine attribute on first run
 xattr -d com.apple.quarantine mdwys-darwin-arm64
 ```
 
+The Windows binaries are unsigned as well. On first launch, Microsoft Defender SmartScreen may show "Windows protected your PC" because the executable does not yet have a publisher signature or SmartScreen reputation.
+
+![Windows SmartScreen warning](docs/images/warning.png)
+
+If you downloaded mdwys from the Releases page and trust that file, click `More info`, then `Run anyway`. Do not bypass this warning for files from an unknown source.
+
 ## Usage
 
 1. Start mdwys.

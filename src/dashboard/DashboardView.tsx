@@ -26,7 +26,17 @@ import {
 import { useI18n } from "../i18n/context";
 import { epubToHtml, isEpubFileName } from "../lib/epub";
 import { FileWidgetBody } from "./FileWidgetBody";
-import { hasWailsBackend, onWailsFileDrop, openExternalEditor, readLocalFile, selectLocalFilePath, startupFilePaths } from "../lib/wailsBackend";
+import {
+  hasWailsBackend,
+  listSiblingImageFiles,
+  onWailsFileDrop,
+  openExternalEditor,
+  readLocalFile,
+  selectLocalFilePath,
+  selectSaveFilePath,
+  startupFilePaths,
+  writeLocalTextFile,
+} from "../lib/wailsBackend";
 import type { EqualizeLayoutDirection, MarkdownMode } from "../App";
 import type { DashboardData, DashboardWidget, LayoutPos } from "./types";
 
@@ -43,6 +53,8 @@ const DEFAULT_VIEW_WIDTH_SCALE = 100;
 const MIN_VIEW_WIDTH_SCALE = 70;
 const MAX_VIEW_WIDTH_SCALE = 180;
 const VIEW_WIDTH_STEP = 10;
+const RECENT_FILES_STORAGE_KEY = "mdwys:recentFiles";
+const MAX_RECENT_FILES = 30;
 
 const widgetDefs = [
   { type: "file" as const, label: "File", icon: FileText, size: { w: 7, h: 5 } },
@@ -51,8 +63,7 @@ const widgetDefs = [
 interface RecentFile {
   id: string;
   fileName: string;
-  filePath?: string;
-  content: string;
+  filePath: string;
   mode: MarkdownMode;
   updatedAt: Date;
 }
@@ -108,12 +119,72 @@ function isImageFileName(fileName: string) {
   return /\.(avif|bmp|gif|jpe?g|png|svg|webp)$/i.test(fileName);
 }
 
-function isBinaryPreviewFileName(fileName: string): boolean {
-  return /\.(avif|bmp|gif|jpe?g|pdf|png|svg|webp)$/i.test(fileName);
+function isWritableTextFileName(fileName: string) {
+  return /\.(md|markdown|txt|html?)$/i.test(fileName);
 }
 
-function recentContent(fileName: string, content: string, filePath?: string): string {
-  return filePath && isBinaryPreviewFileName(fileName) && content.startsWith("data:") ? "" : content;
+function isMarkdownFileName(fileName: string) {
+  return /\.(md|markdown)$/i.test(fileName);
+}
+
+function markdownTitleFromFileName(fileName: string): string {
+  return fileName.replace(/\.(md|markdown)$/i, "") || "untitled";
+}
+
+function markdownFileNameFromTitle(title: string): string {
+  const safeTitle = title.trim().replace(/[<>:"/\\|?*\u0000-\u001f]+/g, "-").replace(/\s+/g, " ").trim() || "untitled";
+  return isMarkdownFileName(safeTitle) ? safeTitle : `${safeTitle}.md`;
+}
+
+function isTextEditingTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) return false;
+  if (target.isContentEditable) return true;
+  return Boolean(target.closest("input, textarea, select, [contenteditable='true']"));
+}
+
+function pathBaseName(path: string): string {
+  return path.split(/[\\/]/).pop() ?? path;
+}
+
+function samePath(left: string, right: string): boolean {
+  return left.replaceAll("\\", "/").toLowerCase() === right.replaceAll("\\", "/").toLowerCase();
+}
+
+function readStoredRecentFiles(): RecentFile[] {
+  try {
+    const stored = localStorage.getItem(RECENT_FILES_STORAGE_KEY);
+    if (!stored) return [];
+    const parsed = JSON.parse(stored);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.flatMap((item): RecentFile[] => {
+      if (!item || typeof item.fileName !== "string") return [];
+      if (typeof item.filePath !== "string" || !item.filePath) return [];
+      const mode = item.mode === "preview" || item.mode === "wysiwyg" || item.mode === "raw" ? item.mode : readFileMode(item.fileName);
+      return [{
+        id: typeof item.id === "string" ? item.id : `${item.filePath}-${Date.now()}`,
+        fileName: item.fileName,
+        filePath: item.filePath,
+        mode,
+        updatedAt: item.updatedAt ? new Date(item.updatedAt) : new Date(),
+      }];
+    }).filter((item) => !Number.isNaN(item.updatedAt.getTime())).slice(0, MAX_RECENT_FILES);
+  } catch {
+    return [];
+  }
+}
+
+function persistRecentFiles(items: RecentFile[]) {
+  try {
+    localStorage.setItem(RECENT_FILES_STORAGE_KEY, JSON.stringify(items.slice(0, MAX_RECENT_FILES).map((item) => ({
+      id: item.id,
+      fileName: item.fileName,
+      filePath: item.filePath,
+      mode: item.mode,
+      updatedAt: item.updatedAt.toISOString(),
+    }))));
+  } catch (error) {
+    console.warn("Could not persist recent files.", error);
+  }
 }
 
 function readViewFontScale(config: Record<string, unknown>): number {
@@ -178,6 +249,7 @@ function FilePickerDialog({
   recentFiles,
   onQueryChange,
   onBrowse,
+  onNew,
   onSelect,
   onClose,
 }: {
@@ -185,13 +257,17 @@ function FilePickerDialog({
   recentFiles: RecentFile[];
   onQueryChange: (value: string) => void;
   onBrowse: () => void;
+  onNew: () => void;
   onSelect: (file: RecentFile) => void;
   onClose: () => void;
 }) {
   const { t: tr } = useI18n();
   const inputRef = useRef<HTMLInputElement | null>(null);
   const normalizedQuery = query.trim().toLowerCase();
-  const filteredFiles = recentFiles.filter((file) => file.fileName.toLowerCase().includes(normalizedQuery));
+  const filteredFiles = recentFiles.filter((file) => {
+    const searchable = `${file.fileName} ${file.filePath ?? ""}`.toLowerCase();
+    return searchable.includes(normalizedQuery);
+  });
 
   useEffect(() => {
     inputRef.current?.focus();
@@ -226,6 +302,10 @@ function FilePickerDialog({
           <button type="button" className="file-picker-browse" onClick={onBrowse}>
             <FolderOpen size={16} />
             <span>{tr("common.browse")}</span>
+          </button>
+          <button type="button" className="file-picker-browse" onClick={onNew}>
+            <FilePlus size={16} />
+            <span>{tr("widget.new")}</span>
           </button>
           <button type="button" className="file-picker-close" onClick={onClose} title={tr("common.close")}>
             <X size={17} />
@@ -273,7 +353,6 @@ export function DashboardView({
   fileName,
   onFileNameChange,
   onNewDocument,
-  onSaveDocument,
   onExportDocument,
   onHistoryClick,
   isDark,
@@ -298,7 +377,6 @@ export function DashboardView({
   fileName: string;
   onFileNameChange: (value: string) => void;
   onNewDocument: () => void;
-  onSaveDocument: () => void;
   onExportDocument: () => void;
   onHistoryClick: () => void;
   isDark: boolean;
@@ -326,8 +404,9 @@ export function DashboardView({
   const handledSplitWidgetRequestRef = useRef(0);
   const hydratedFilePathsRef = useRef(new Set<string>());
   const handledStartupFilesRef = useRef(false);
+  const navigatingImageRef = useRef(false);
   const [startupFileCheckDone, setStartupFileCheckDone] = useState(() => !hasWailsBackend());
-  const [recentFiles, setRecentFiles] = useState<RecentFile[]>([]);
+  const [recentFiles, setRecentFiles] = useState<RecentFile[]>(() => readStoredRecentFiles());
   const [filePickerTargetId, setFilePickerTargetId] = useState<string | null>(null);
   const [filePickerCreatesWidget, setFilePickerCreatesWidget] = useState(false);
   const [filePickerCreateDirection, setFilePickerCreateDirection] = useState<EqualizeLayoutDirection>("horizontal");
@@ -352,13 +431,16 @@ export function DashboardView({
     [onChange],
   );
 
-  const recordRecentFile = useCallback((fileName: string, content: string, mode: MarkdownMode, filePath?: string) => {
-    if (!fileName.trim()) return;
-    const storedContent = recentContent(fileName, content, filePath);
-    setRecentFiles((items) => [
-      { id: `${filePath || fileName}-${Date.now()}`, fileName, filePath, content: storedContent, mode, updatedAt: new Date() },
-      ...items.filter((item) => (filePath ? item.filePath !== filePath : item.fileName !== fileName)).slice(0, 29),
-    ]);
+  const recordRecentFile = useCallback((fileName: string, mode: MarkdownMode, filePath?: string) => {
+    if (!fileName.trim() || !filePath) return;
+    setRecentFiles((items) => {
+      const next = [
+        { id: `${filePath}-${Date.now()}`, fileName, filePath, mode, updatedAt: new Date() },
+        ...items.filter((item) => item.filePath !== filePath),
+      ].slice(0, MAX_RECENT_FILES);
+      persistRecentFiles(next);
+      return next;
+    });
   }, []);
 
   useEffect(() => {
@@ -368,11 +450,10 @@ export function DashboardView({
       if (widget.type !== "file") return;
       const widgetFileName = typeof widget.config.fileName === "string" ? widget.config.fileName : "";
       const widgetFilePath = typeof widget.config.filePath === "string" ? widget.config.filePath : undefined;
-      const widgetContent = typeof widget.config.content === "string" ? widget.config.content : "";
       const widgetMode = widget.config.mode === "preview" || widget.config.mode === "wysiwyg" || widget.config.mode === "raw"
         ? widget.config.mode
         : readFileMode(widgetFileName);
-      if (widgetFileName && widgetContent) recordRecentFile(widgetFileName, widgetContent, widgetMode, widgetFilePath);
+      if (widgetFileName && widgetFilePath) recordRecentFile(widgetFileName, widgetMode, widgetFilePath);
     });
   }, [data.widgets, recordRecentFile]);
 
@@ -385,9 +466,8 @@ export function DashboardView({
 
       const nextFileName = typeof nextConfig.fileName === "string" ? nextConfig.fileName : "";
       const nextFilePath = typeof nextConfig.filePath === "string" ? nextConfig.filePath : undefined;
-      const nextContent = typeof nextConfig.content === "string" ? nextConfig.content : "";
       const nextMode = nextConfig.mode === "preview" || nextConfig.mode === "wysiwyg" || nextConfig.mode === "raw" ? nextConfig.mode : readFileMode(nextFileName);
-      if (nextFileName && nextContent) recordRecentFile(nextFileName, nextContent, nextMode, nextFilePath);
+      if (nextFileName && nextFilePath) recordRecentFile(nextFileName, nextMode, nextFilePath);
     },
     [data.widgets, recordRecentFile, updateWidget],
   );
@@ -658,7 +738,7 @@ export function DashboardView({
         };
         return { widgets: buildAddedWidgets(current.widgets, nextWidget, direction) };
       });
-      recordRecentFile(fileName, content, mode, filePath);
+      recordRecentFile(fileName, mode, filePath);
       setActiveWidgetId(nextWidgetId);
       return nextWidgetId;
     },
@@ -717,6 +797,32 @@ export function DashboardView({
     [activeLayoutDirection, createFileWidget, filePickerCreateDirection, filePickerCreatesWidget, filePickerTargetId, openFileInWidget],
   );
 
+  const createNewMarkdownFromPicker = useCallback(() => {
+    const fileName = "untitled.md";
+    const content = "# Untitled\n\n";
+    const config = { fileName, fileTitle: "untitled", filePath: undefined, content, mode: "wysiwyg" as MarkdownMode };
+    if (filePickerCreatesWidget) {
+      const nextWidgetId = crypto.randomUUID();
+      onChange((current) => {
+        if (current.widgets.length >= MAX_WIDGETS) return current;
+        const nextWidget = {
+          ...widgetDefaults("file", current.widgets, filePickerCreateDirection),
+          id: nextWidgetId,
+          config,
+        };
+        return { widgets: buildAddedWidgets(current.widgets, nextWidget, filePickerCreateDirection) };
+      });
+      setActiveWidgetId(nextWidgetId);
+    } else if (filePickerTargetId) {
+      updateFileWidget(filePickerTargetId, config);
+      setActiveWidgetId(filePickerTargetId);
+    }
+    setFilePickerTargetId(null);
+    setFilePickerCreatesWidget(false);
+    setFilePickerCreateDirection(activeLayoutDirection);
+    setFilePickerQuery("");
+  }, [activeLayoutDirection, buildAddedWidgets, filePickerCreateDirection, filePickerCreatesWidget, filePickerTargetId, onChange, updateFileWidget]);
+
   const openPathAsWidget = useCallback(
     async (path: string) => {
       const result = await readLocalFile(path);
@@ -735,6 +841,71 @@ export function DashboardView({
       openFileInWidget(widgetId, result.fileName, content, readFileMode(result.fileName), result.path);
     },
     [openFileInWidget],
+  );
+
+  const saveFileWidget = useCallback(
+    async (widgetId: string, fileName: string, content: string, mode: MarkdownMode, filePath: string) => {
+      if (filePath ? !isWritableTextFileName(fileName) : !isMarkdownFileName(fileName)) {
+        alert(tr("alert.saveTextOnly"));
+        return;
+      }
+      if (!hasWailsBackend()) {
+        downloadFile(fileName, content);
+        return;
+      }
+
+      try {
+        const targetPath = filePath || await selectSaveFilePath(fileName || "untitled.md");
+        if (!targetPath) return;
+        const result = await writeLocalTextFile(targetPath, content);
+        if (!result) throw new Error("Save returned no file.");
+        updateFileWidget(widgetId, { fileName: result.fileName, filePath: result.path, content: result.content, mode });
+        recordRecentFile(result.fileName, mode, result.path);
+      } catch (error) {
+        console.error(error);
+        alert(tr("alert.saveFailed"));
+      }
+    },
+    [recordRecentFile, tr, updateFileWidget],
+  );
+
+  const navigateImageSibling = useCallback(
+    async (direction: -1 | 1) => {
+      if (navigatingImageRef.current) return;
+      const imageWidgets = data.widgets.filter((item) => {
+        const fileName = typeof item.config.fileName === "string" ? item.config.fileName : "";
+        const filePath = typeof item.config.filePath === "string" ? item.config.filePath : "";
+        return item.type === "file" && Boolean(filePath) && isImageFileName(fileName);
+      });
+      const widgetId = activeWidgetId ?? maximizedWidgetId ?? (imageWidgets.length === 1 ? imageWidgets[0].id : null);
+      if (!widgetId) return;
+
+      const widget = data.widgets.find((item) => item.id === widgetId);
+      if (!widget || widget.type !== "file") return;
+      const fileName = typeof widget.config.fileName === "string" ? widget.config.fileName : "";
+      const filePath = typeof widget.config.filePath === "string" ? widget.config.filePath : "";
+      if (!filePath || !isImageFileName(fileName)) return;
+
+      navigatingImageRef.current = true;
+      try {
+        const siblings = await listSiblingImageFiles(filePath);
+        if (siblings.length < 2) return;
+        let currentIndex = siblings.findIndex((path) => samePath(path, filePath));
+        if (currentIndex < 0) {
+          currentIndex = siblings.findIndex((path) => pathBaseName(path).toLowerCase() === fileName.toLowerCase());
+        }
+        if (currentIndex < 0) return;
+        const nextIndex = (currentIndex + direction + siblings.length) % siblings.length;
+        const nextPath = siblings[nextIndex];
+        if (!nextPath || nextPath === filePath) return;
+        await openPathInWidget(widget.id, nextPath);
+      } catch (error) {
+        console.warn("Could not navigate image files.", error);
+      } finally {
+        navigatingImageRef.current = false;
+      }
+    },
+    [activeWidgetId, data.widgets, maximizedWidgetId, openPathInWidget],
   );
 
   useEffect(() => {
@@ -771,7 +942,7 @@ export function DashboardView({
             config: { fileName: file.fileName, filePath: file.path, content: file.content, mode: file.mode },
           };
           nextWidgets = buildAddedWidgets(nextWidgets, nextWidget, activeLayoutDirection);
-          recordRecentFile(file.fileName, file.content, file.mode, file.path);
+          recordRecentFile(file.fileName, file.mode, file.path);
         }
 
         onChange({ widgets: nextWidgets });
@@ -890,9 +1061,31 @@ export function DashboardView({
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
+      if (!event.metaKey && !event.ctrlKey && !event.altKey && !event.shiftKey) {
+        if ((event.key === "ArrowLeft" || event.key === "ArrowRight") && !isTextEditingTarget(event.target)) {
+          event.preventDefault();
+          void navigateImageSibling(event.key === "ArrowLeft" ? -1 : 1);
+          return;
+        }
+      }
+
       const meta = event.metaKey || event.ctrlKey;
       if (!meta) return;
       const key = event.key.toLowerCase();
+      if (key === "s") {
+        const widgetId = activeWidgetId ?? maximizedWidgetId ?? (data.widgets.length === 1 ? data.widgets[0].id : null);
+        const widget = data.widgets.find((item) => item.id === widgetId);
+        if (!widget || widget.type !== "file") return;
+        const targetFileName = typeof widget.config.fileName === "string" ? widget.config.fileName : fileName;
+        const targetFilePath = typeof widget.config.filePath === "string" ? widget.config.filePath : "";
+        const targetContent = typeof widget.config.content === "string" ? widget.config.content : documentMarkdown;
+        const targetMode = widget.config.mode === "preview" || widget.config.mode === "wysiwyg" || widget.config.mode === "raw"
+          ? widget.config.mode
+          : readFileMode(targetFileName);
+        event.preventDefault();
+        void saveFileWidget(widget.id, targetFileName, targetContent, targetMode, targetFilePath);
+        return;
+      }
       if (key === "p") {
         event.preventDefault();
         openFilePicker();
@@ -909,7 +1102,7 @@ export function DashboardView({
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [activeWidgetId, data.widgets, openFilePicker]);
+  }, [activeWidgetId, data.widgets, documentMarkdown, fileName, maximizedWidgetId, navigateImageSibling, openFilePicker, saveFileWidget]);
 
   const markdownModes: Array<{ key: MarkdownMode; label: string; icon: LucideIcon }> = [
     { key: "preview", label: "Preview", icon: Eye },
@@ -942,6 +1135,7 @@ export function DashboardView({
             (() => {
               const widgetFileName = typeof widget.config.fileName === "string" ? widget.config.fileName : fileName;
               const widgetFilePath = typeof widget.config.filePath === "string" ? widget.config.filePath : "";
+              const widgetFileTitle = typeof widget.config.fileTitle === "string" ? widget.config.fileTitle : markdownTitleFromFileName(widgetFileName);
               const widgetContent = typeof widget.config.content === "string" ? widget.config.content : documentMarkdown;
               const widgetMode = widget.config.mode === "preview" || widget.config.mode === "wysiwyg" || widget.config.mode === "raw"
                 ? widget.config.mode
@@ -949,6 +1143,7 @@ export function DashboardView({
               const fileIsMarkdown = widgetFileName.toLowerCase().endsWith(".md") || widgetFileName.toLowerCase().endsWith(".markdown");
               const fileIsHtml = /\.(html?|epub)$/i.test(widgetFileName);
               const fileIsPdf = /\.pdf$/i.test(widgetFileName);
+              const canEditUnsavedMarkdownTitle = !widgetFilePath && fileIsMarkdown;
               const viewFontScale = readViewFontScale(widget.config);
               const viewWidthScale = readViewWidthScale(widget.config);
               const canAdjustView = (fileIsMarkdown && widgetMode === "preview") || fileIsHtml || fileIsPdf;
@@ -970,11 +1165,11 @@ export function DashboardView({
               const isMaximized = maximizedWidgetId === widget.id;
               const handleAction = (id: string) => {
                 if (id === "new") {
-                  updateFileConfig({ fileName: "untitled.md", filePath: undefined, content: "# Untitled\n\n", mode: "wysiwyg" });
+                  updateFileConfig({ fileName: "untitled.md", fileTitle: "untitled", filePath: undefined, content: "# Untitled\n\n", mode: "wysiwyg" });
                 } else if (id === "open") {
                   openFilePicker(widget.id);
                 } else if (id === "save") {
-                  onSaveDocument();
+                  void saveFileWidget(widget.id, widgetFileName, widgetContent, widgetMode, widgetFilePath);
                 } else if (id === "export") {
                   downloadFile(widgetFileName, widgetContent);
                 } else if (id === "history") {
@@ -1049,7 +1244,18 @@ export function DashboardView({
               >
                 {widget.type === "file" ? (
                   <div className="markdown-widget-header-main">
-                    <span className="widget-filename-label" title={widgetFileName}>{widgetFileName}</span>
+                    {canEditUnsavedMarkdownTitle ? (
+                      <input
+                        className="widget-filename-input"
+                        value={widgetFileTitle}
+                        onChange={(event) => updateFileConfig({ fileTitle: event.target.value, fileName: markdownFileNameFromTitle(event.target.value) })}
+                        onClick={(event) => event.stopPropagation()}
+                        onKeyDown={(event) => event.stopPropagation()}
+                        aria-label={tr("widget.fileTitle")}
+                      />
+                    ) : (
+                      <span className="widget-filename-label" title={widgetFileName}>{widgetFileName}</span>
+                    )}
                   </div>
                 ) : (
                   <strong>{widget.title}</strong>
@@ -1350,19 +1556,16 @@ export function DashboardView({
           recentFiles={recentFiles}
           onQueryChange={setFilePickerQuery}
           onBrowse={browseLocalFile}
+          onNew={createNewMarkdownFromPicker}
           onSelect={async (file) => {
-            if (file.filePath) {
-              setFilePickerTargetId(null);
-              setFilePickerCreatesWidget(false);
-              setFilePickerCreateDirection(activeLayoutDirection);
-              setFilePickerQuery("");
-              const result = await readLocalFile(file.filePath);
-              if (!result) return;
-              const content = await prepareOpenedContent(result.fileName, result.content);
-              applyPickedFile(result.fileName, content, readFileMode(result.fileName), result.path);
-              return;
-            }
-            applyPickedFile(file.fileName, file.content, file.mode, file.filePath);
+            setFilePickerTargetId(null);
+            setFilePickerCreatesWidget(false);
+            setFilePickerCreateDirection(activeLayoutDirection);
+            setFilePickerQuery("");
+            const result = await readLocalFile(file.filePath);
+            if (!result) return;
+            const content = await prepareOpenedContent(result.fileName, result.content);
+            applyPickedFile(result.fileName, content, readFileMode(result.fileName), result.path);
           }}
           onClose={() => {
             setFilePickerTargetId(null);

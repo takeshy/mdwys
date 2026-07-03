@@ -18,9 +18,12 @@ export interface MemoListEntry {
 interface WailsAppApi {
   SelectLocalFile: () => Promise<LocalFileResult | null>;
   SelectLocalFilePath: () => Promise<string>;
+  SelectSaveFilePath: (defaultFileName: string) => Promise<string>;
   SelectDirectoryPath: () => Promise<string>;
   SelectExternalEditor: () => Promise<string>;
   ReadLocalFile: (path: string) => Promise<LocalFileResult>;
+  WriteLocalTextFile: (path: string, content: string) => Promise<LocalFileResult>;
+  ListSiblingImageFiles: (path: string) => Promise<string[] | null>;
   ReadMemoFile: (path: string) => Promise<MemoFileResult>;
   ListMemoFiles: (dir: string) => Promise<MemoListEntry[] | null>;
   AppendMemoFile: (path: string, content: string) => Promise<void>;
@@ -61,6 +64,10 @@ export async function selectLocalFilePath(): Promise<string> {
   return await appApi()?.SelectLocalFilePath() ?? "";
 }
 
+export async function selectSaveFilePath(defaultFileName: string): Promise<string> {
+  return await appApi()?.SelectSaveFilePath(defaultFileName) ?? "";
+}
+
 export async function selectDirectoryPath(): Promise<string> {
   return await appApi()?.SelectDirectoryPath() ?? "";
 }
@@ -94,6 +101,16 @@ export async function selectExternalEditor(): Promise<string> {
 export async function readLocalFile(path: string): Promise<LocalFileResult | null> {
   if (!path) return null;
   return await appApi()?.ReadLocalFile(path) ?? null;
+}
+
+export async function writeLocalTextFile(path: string, content: string): Promise<LocalFileResult | null> {
+  if (!path) return null;
+  return await appApi()?.WriteLocalTextFile(path, content) ?? null;
+}
+
+export async function listSiblingImageFiles(path: string): Promise<string[]> {
+  if (!path) return [];
+  return await appApi()?.ListSiblingImageFiles(path) ?? [];
 }
 
 export async function startupFilePaths(): Promise<string[]> {
