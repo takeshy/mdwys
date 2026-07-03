@@ -326,6 +326,7 @@ export function DashboardView({
   const handledSplitWidgetRequestRef = useRef(0);
   const hydratedFilePathsRef = useRef(new Set<string>());
   const handledStartupFilesRef = useRef(false);
+  const [startupFileCheckDone, setStartupFileCheckDone] = useState(() => !hasWailsBackend());
   const [recentFiles, setRecentFiles] = useState<RecentFile[]>([]);
   const [filePickerTargetId, setFilePickerTargetId] = useState<string | null>(null);
   const [filePickerCreatesWidget, setFilePickerCreatesWidget] = useState(false);
@@ -675,6 +676,7 @@ export function DashboardView({
   );
 
   useEffect(() => {
+    if (!startupFileCheckDone) return;
     if (!hasWailsBackend()) return;
     data.widgets.forEach((widget) => {
       if (widget.type !== "file") return;
@@ -698,7 +700,7 @@ export function DashboardView({
         }
       })();
     });
-  }, [data.widgets, openFileInWidget]);
+  }, [data.widgets, openFileInWidget, startupFileCheckDone]);
 
   const applyPickedFile = useCallback(
     (fileName: string, content: string, mode: MarkdownMode, filePath?: string) => {
@@ -736,36 +738,50 @@ export function DashboardView({
   );
 
   useEffect(() => {
-    if (!hasWailsBackend() || handledStartupFilesRef.current) return;
+    if (!hasWailsBackend()) {
+      setStartupFileCheckDone(true);
+      return;
+    }
+    if (handledStartupFilesRef.current) return;
     handledStartupFilesRef.current = true;
 
     void (async () => {
-      const paths = await startupFilePaths();
-      if (!paths.length) return;
+      try {
+        const paths = await startupFilePaths();
+        if (!paths.length) return;
 
-      const emptyWidget = data.widgets.find((widget) => {
-        if (widget.type !== "file") return false;
-        const fileName = typeof widget.config.fileName === "string" ? widget.config.fileName : "";
-        const filePath = typeof widget.config.filePath === "string" ? widget.config.filePath : "";
-        const content = typeof widget.config.content === "string" ? widget.config.content : "";
-        return !fileName && !filePath && !content;
-      });
-
-      for (const [index, path] of paths.entries()) {
-        try {
-          if (index === 0 && emptyWidget) {
-            await openPathInWidget(emptyWidget.id, path);
-            setMaximizedWidgetId(emptyWidget.id);
-          } else {
-            const widgetId = await openPathAsWidget(path);
-            if (index === 0 && widgetId) setMaximizedWidgetId(widgetId);
+        const openedFiles = [];
+        for (const path of paths) {
+          try {
+            const result = await readLocalFile(path);
+            if (!result) continue;
+            const content = await prepareOpenedContent(result.fileName, result.content);
+            openedFiles.push({ ...result, content, mode: readFileMode(result.fileName) });
+          } catch (error) {
+            console.warn("Could not open startup file.", error);
           }
-        } catch (error) {
-          console.warn("Could not open startup file.", error);
         }
+
+        if (!openedFiles.length) return;
+
+        let nextWidgets: DashboardWidget[] = [];
+        for (const file of openedFiles.slice(0, MAX_WIDGETS)) {
+          const nextWidget = {
+            ...widgetDefaults("file", nextWidgets, activeLayoutDirection),
+            config: { fileName: file.fileName, filePath: file.path, content: file.content, mode: file.mode },
+          };
+          nextWidgets = buildAddedWidgets(nextWidgets, nextWidget, activeLayoutDirection);
+          recordRecentFile(file.fileName, file.content, file.mode, file.path);
+        }
+
+        onChange({ widgets: nextWidgets });
+        setActiveWidgetId(nextWidgets[0]?.id ?? null);
+        setMaximizedWidgetId(nextWidgets[0]?.id ?? null);
+      } finally {
+        setStartupFileCheckDone(true);
       }
     })();
-  }, [data.widgets, openPathAsWidget, openPathInWidget]);
+  }, [activeLayoutDirection, buildAddedWidgets, onChange, recordRecentFile]);
 
   const browseLocalFile = useCallback(async () => {
     if (hasWailsBackend()) {
@@ -922,7 +938,7 @@ export function DashboardView({
             gap: GAP,
           }}
         >
-          {data.widgets.map((widget) => (
+          {(startupFileCheckDone ? data.widgets : []).map((widget) => (
             (() => {
               const widgetFileName = typeof widget.config.fileName === "string" ? widget.config.fileName : fileName;
               const widgetFilePath = typeof widget.config.filePath === "string" ? widget.config.filePath : "";
