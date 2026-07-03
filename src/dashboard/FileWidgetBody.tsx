@@ -28,7 +28,8 @@ import {
   setMemoHighlights,
   type TextIndex,
 } from "../lib/textAnchor";
-import { appendMemoFile, hasWailsBackend, readMemoFile, writeMemoFileAtomic } from "../lib/wailsBackend";
+import { appendMemoFile, hasWailsBackend, readLocalFile, readMemoFile, writeMemoFileAtomic } from "../lib/wailsBackend";
+import { isLocalDocumentHref, localHrefToPathCandidates, pathDirName, transformWikiLinks, wikiTargetToPath } from "../lib/wikiLinks";
 import { MemoTimelinePanel, memoHoverPreview, type MemoDraft } from "./MemoTimelinePanel";
 import type { MarkdownMode } from "../App";
 import type { DashboardWidget } from "./types";
@@ -207,6 +208,8 @@ export function FileWidgetBody({
     () => (memoDirPath && filePath ? memoFilePathFor(memoDirPath, filePath) : ""),
     [memoDirPath, filePath],
   );
+  const wikiBaseDirPath = useMemo(() => pathDirName(filePath) || memoDirPath, [filePath, memoDirPath]);
+  const previewContent = useMemo(() => transformWikiLinks(documentContent), [documentContent]);
 
   const [memoEntries, setMemoEntries] = useState<MemoEntry[]>([]);
   const [memoLoading, setMemoLoading] = useState(false);
@@ -328,6 +331,29 @@ export function FileWidgetBody({
     (id: string, pinned: boolean) => rewriteMemo((content) => setEntryPinned(content, id, pinned)),
     [rewriteMemo],
   );
+
+  const openWikiLink = useCallback((href: string, event: ReactMouseEvent<HTMLElement>) => {
+    if (!isLocalDocumentHref(href)) return;
+    event.preventDefault();
+    event.stopPropagation();
+    void (async () => {
+      const paths = href.startsWith("#wiki")
+        ? [wikiTargetToPath(wikiBaseDirPath, decodeURIComponent(href.replace(/^#wiki(embed)?:/, "")))]
+        : localHrefToPathCandidates(wikiBaseDirPath, href);
+      for (const path of paths) {
+        try {
+          const file = await readLocalFile(path);
+          if (file) {
+            onOpenPath(path);
+            return;
+          }
+        } catch {
+          // Try the next candidate.
+        }
+      }
+      if (paths[0]) onOpenPath(paths[0]);
+    })();
+  }, [onOpenPath, wikiBaseDirPath]);
 
   // ---- anchor resolution & highlights -------------------------------------
 
@@ -820,7 +846,7 @@ export function FileWidgetBody({
             ["--view-content-width" as string]: `${Math.round(1120 * viewWidthScale / 100)}px`,
           }}
         >
-          <MarkdownPreview content={documentContent} isDark={isDark} />
+          <MarkdownPreview content={previewContent} isDark={isDark} onLinkClick={openWikiLink} />
         </div>
       );
     }

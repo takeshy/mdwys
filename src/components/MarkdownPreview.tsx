@@ -1,7 +1,9 @@
 import ReactMarkdown from "react-markdown";
 import rehypeHighlight from "rehype-highlight";
 import remarkGfm from "remark-gfm";
+import type { MouseEvent } from "react";
 import { MermaidCodeBlock } from "./MermaidCodeBlock";
+import { isLocalDocumentHref } from "../lib/wikiLinks";
 
 type MarkdownNode = {
   type?: string;
@@ -135,7 +137,15 @@ function slugify(value: string): string {
   return value.trim().toLowerCase().replace(/[^\p{L}\p{N}\s-]/gu, "").replace(/\s+/g, "-");
 }
 
-export function MarkdownPreview({ content, isDark }: { content: string; isDark: boolean }) {
+export function MarkdownPreview({
+  content,
+  isDark,
+  onLinkClick,
+}: {
+  content: string;
+  isDark: boolean;
+  onLinkClick?: (href: string, event: MouseEvent<HTMLElement>) => void;
+}) {
   return (
     <div className="markdown-preview">
       <ReactMarkdown
@@ -148,11 +158,34 @@ export function MarkdownPreview({ content, isDark }: { content: string; isDark: 
           h4: ({ children }) => <h4 id={slugify(textFromChildren(children))}>{children}</h4>,
           h5: ({ children }) => <h5 id={slugify(textFromChildren(children))}>{children}</h5>,
           h6: ({ children }) => <h6 id={slugify(textFromChildren(children))}>{children}</h6>,
-          a: ({ href, children, ...props }) => (
-            <a href={href} target={href?.startsWith("#") ? undefined : "_blank"} rel="noreferrer" {...props}>
-              {children}
-            </a>
-          ),
+          a: ({ href, children, ...props }) => {
+            if (href && onLinkClick && isLocalDocumentHref(href)) {
+              return (
+                <button
+                  type="button"
+                  className="markdown-link-button"
+                  onClick={(event) => {
+                    onLinkClick?.(href, event);
+                  }}
+                >
+                  {children}
+                </button>
+              );
+            }
+            return (
+              <a
+                href={href}
+                target={href?.startsWith("#") ? undefined : "_blank"}
+                rel="noreferrer"
+                onClick={(event) => {
+                  if (href) onLinkClick?.(href, event);
+                }}
+                {...props}
+              >
+                {children}
+              </a>
+            );
+          },
           blockquote({ children, ...props }) {
             const calloutType = String((props as Record<string, unknown>)["data-callout"] || "");
             if (!calloutType) return <blockquote {...props}>{children}</blockquote>;

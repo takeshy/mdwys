@@ -3,9 +3,9 @@ import { Check, ChevronsLeft, Code, CornerUpLeft, Link2Off, PenLine, Pencil, Pin
 import { MarkdownPreview } from "../components/MarkdownPreview";
 import { WysiwygEditor } from "../components/WysiwygEditor";
 import type { MemoEntry } from "../lib/memoTimeline";
-import { isWindowsPath } from "../lib/memoPath";
 import { useI18n } from "../i18n/context";
 import { readLocalFile } from "../lib/wailsBackend";
+import { IMAGE_EXT_RE, isLocalDocumentHref, localHrefToPathCandidates, transformWikiLinks, wikiTargetToPath } from "../lib/wikiLinks";
 
 export interface MemoDraft {
   anchor: string;
@@ -49,28 +49,8 @@ function anchorLabel(anchor: string): string {
   return "text";
 }
 
-const IMAGE_EXT_RE = /\.(avif|bmp|gif|jpe?g|png|svg|webp)$/i;
-
-function wikiTargetToPath(memoDirPath: string, target: string): string {
-  const clean = target.split("|")[0].split("#")[0].trim();
-  if (!clean) return "";
-  const withExt = /\.[A-Za-z0-9]+$/.test(clean) ? clean : `${clean}.md`;
-  const separator = isWindowsPath(memoDirPath) ? "\\" : "/";
-  const trimmed = memoDirPath.endsWith("/") || memoDirPath.endsWith("\\") ? memoDirPath.slice(0, -1) : memoDirPath;
-  return `${trimmed}${separator}${withExt}`;
-}
-
 // §7.5: wiki links resolve against the memo directory. Links become
 // `#wiki:` hrefs we intercept; image embeds resolve to data URLs.
-function transformWikiLinks(body: string): string {
-  return body
-    .replace(/!\[\[([^\]\n]+)\]\]/g, (_match, target: string) => `![${target}](#wikiembed:${encodeURIComponent(target)})`)
-    .replace(/(^|[^!])\[\[([^\]\n]+)\]\]/g, (_match, lead: string, target: string) => {
-      const label = target.split("|")[1]?.trim() || target.split("|")[0].trim();
-      return `${lead}[${label}](#wiki:${encodeURIComponent(target)})`;
-    });
-}
-
 function MemoEntryBody({
   body,
   isDark,
@@ -115,20 +95,32 @@ function MemoEntryBody({
     };
   }, [transformed, memoDirPath]);
 
-  const onClickCapture = useCallback((event: React.MouseEvent) => {
-    const anchor = (event.target as HTMLElement).closest("a");
-    const href = anchor?.getAttribute("href") ?? "";
-    if (!href.startsWith("#wiki:") && !href.startsWith("#wikiembed:")) return;
+  const handleLinkClick = useCallback((href: string, event: React.MouseEvent<HTMLElement>) => {
+    if (!isLocalDocumentHref(href)) return;
     event.preventDefault();
     event.stopPropagation();
-    const target = decodeURIComponent(href.replace(/^#wiki(embed)?:/, ""));
-    const path = wikiTargetToPath(memoDirPath, target);
-    if (path) onOpenPath(path);
+    void (async () => {
+      const paths = href.startsWith("#wiki")
+        ? [wikiTargetToPath(memoDirPath, decodeURIComponent(href.replace(/^#wiki(embed)?:/, "")))]
+        : localHrefToPathCandidates(memoDirPath, href);
+      for (const path of paths) {
+        try {
+          const file = await readLocalFile(path);
+          if (file) {
+            onOpenPath(path);
+            return;
+          }
+        } catch {
+          // Try the next candidate.
+        }
+      }
+      if (paths[0]) onOpenPath(paths[0]);
+    })();
   }, [memoDirPath, onOpenPath]);
 
   return (
-    <div className="memo-entry-body" onClickCapture={onClickCapture}>
-      <MarkdownPreview content={resolved} isDark={isDark} />
+    <div className="memo-entry-body">
+      <MarkdownPreview content={resolved} isDark={isDark} onLinkClick={handleLinkClick} />
     </div>
   );
 }

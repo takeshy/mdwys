@@ -306,6 +306,17 @@ textarea {
   color: var(--accent);
 }
 
+.markdown-link-button {
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: var(--accent);
+  font: inherit;
+  text-align: inherit;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
 .markdown-preview pre {
   overflow: auto;
   border: 1px solid var(--border);
